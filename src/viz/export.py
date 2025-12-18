@@ -50,6 +50,7 @@ class Exporter:
         self.decisions: List[VizDecision] = []
         self.trades: List[VizTrade] = []
         self.splits: List[VizSplit] = []
+        self.full_series: Optional[VizBarSeries] = None
         
         # Tracking
         self._decision_idx = 0
@@ -71,6 +72,34 @@ class Exporter:
             test_start=test_start,
             test_end=test_end,
         ))
+    
+    def set_full_series(self, df, timeframe: str = "1m"):
+        """
+        Set the full OHLCV series for global timeline view.
+        
+        Args:
+            df: DataFrame with time, open, high, low, close, volume columns
+            timeframe: Timeframe string (e.g., "1m")
+        """
+        if not self.config.include_full_series:
+            return
+        
+        bars = []
+        for _, row in df.iterrows():
+            bars.append({
+                'time': row['time'].isoformat() if hasattr(row['time'], 'isoformat') else str(row['time']),
+                'open': float(row['open']),
+                'high': float(row['high']),
+                'low': float(row['low']),
+                'close': float(row['close']),
+                'volume': float(row['volume']),
+            })
+        
+        self.full_series = VizBarSeries(
+            timeframe=timeframe,
+            bars=bars,
+            trade_markers=[]
+        )
     
     def on_decision(
         self,
@@ -245,6 +274,13 @@ class Exporter:
             for t in self.trades:
                 f.write(json.dumps(t.to_dict(), default=str) + '\n')
         
+        # Write full_series.json if available
+        series_path = None
+        if self.full_series:
+            series_path = out_dir / "full_series.json"
+            with open(series_path, 'w') as f:
+                json.dump(self.full_series.to_dict(), f, default=str)
+        
         # Write manifest.json
         manifest = {
             'run_id': self.run_id,
@@ -265,6 +301,10 @@ class Exporter:
                 'trades': self._file_checksum(trades_path),
             }
         }
+        
+        if series_path:
+            manifest['files']['full_series'] = 'full_series.json'
+            manifest['checksums']['full_series'] = self._file_checksum(series_path)
         
         manifest_path = out_dir / "manifest.json"
         with open(manifest_path, 'w') as f:

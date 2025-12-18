@@ -35,7 +35,7 @@ ipynb_checkpoints/
 *.pth
 *.pt
 *.ckpt
-models/
+/models/
 cnn_filter.pth
 best_model.pth
 

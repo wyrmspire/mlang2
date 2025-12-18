@@ -6,6 +6,7 @@ Central config dataclass for experiments.
 from dataclasses import dataclass, field
 from typing import List, Dict, Any, Optional
 from pathlib import Path
+from enum import Enum
 import json
 
 from src.features.pipeline import FeatureConfig
@@ -15,6 +16,52 @@ from src.sim.bar_fill_model import BarFillConfig
 from src.sim.costs import CostModel, DEFAULT_COSTS
 from src.models.train import TrainConfig
 from src.datasets.schema import DatasetSchema
+
+
+class RunMode(Enum):
+    """
+    Execution mode for the system.
+    
+    Controls what operations are permitted:
+    - TRAIN: Can peek at future data for labeling, can learn, cannot trade
+    - REPLAY: Cannot peek future, cannot learn, can simulate trades
+    - SCAN: Cannot peek future, cannot learn, cannot trade (read-only analysis)
+    """
+    TRAIN = "TRAIN"
+    REPLAY = "REPLAY"
+    SCAN = "SCAN"
+
+
+@dataclass
+class ReplayConfig:
+    """
+    Configuration for replay mode.
+    
+    Controls how to step through historical data in replay mode.
+    """
+    # Time range
+    start_bar: int = 0
+    end_bar: Optional[int] = None
+    
+    # Playback controls
+    speed_multiplier: float = 1.0  # 1.0 = real-time, 2.0 = 2x speed, etc.
+    auto_play: bool = True
+    pause_on_decision: bool = False
+    
+    # What to show
+    show_future_bars: int = 20  # How many bars ahead to display
+    show_oco_zones: bool = True
+    
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            'start_bar': self.start_bar,
+            'end_bar': self.end_bar,
+            'speed_multiplier': self.speed_multiplier,
+            'auto_play': self.auto_play,
+            'pause_on_decision': self.pause_on_decision,
+            'show_future_bars': self.show_future_bars,
+            'show_oco_zones': self.show_oco_zones,
+        }
 
 
 @dataclass
@@ -27,6 +74,12 @@ class ExperimentConfig:
     # Identification
     name: str = "experiment"
     description: str = ""
+    
+    # Run mode
+    run_mode: RunMode = RunMode.TRAIN
+    
+    # Replay configuration (only used when run_mode == REPLAY)
+    replay_config: ReplayConfig = field(default_factory=ReplayConfig)
     
     # Data range
     start_date: str = ""
@@ -61,6 +114,8 @@ class ExperimentConfig:
         return {
             'name': self.name,
             'description': self.description,
+            'run_mode': self.run_mode.value,
+            'replay_config': self.replay_config.to_dict(),
             'start_date': self.start_date,
             'end_date': self.end_date,
             'timeframe': self.timeframe,

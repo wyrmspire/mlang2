@@ -6,8 +6,10 @@ Combine CNN price encoders with context MLP.
 import torch
 import torch.nn as nn
 
+from src.models import ModelRole
 from src.models.encoders import MultiTFEncoder
 from src.models.context_mlp import ContextMLP
+from src.experiments.config import RunMode
 
 
 class FusionModel(nn.Module):
@@ -26,9 +28,11 @@ class FusionModel(nn.Module):
         price_embedding_per_tf: int = 32,
         context_embedding: int = 32,
         num_classes: int = 2,  # WIN/LOSS
-        dropout: float = 0.3
+        dropout: float = 0.3,
+        role: ModelRole = ModelRole.TRAINING_ONLY
     ):
         super().__init__()
+        self.role = role
         
         # Price encoder
         self.price_encoder = MultiTFEncoder(
@@ -59,12 +63,20 @@ class FusionModel(nn.Module):
         
         self.num_classes = num_classes
     
+    def check_can_run(self, run_mode: RunMode):
+        """Verify model is allowed to run in the current mode."""
+        if run_mode == RunMode.REPLAY and self.role == ModelRole.TRAINING_ONLY:
+            raise RuntimeError(f"Model with role {self.role} is barred from REPLAY mode to prevent future leakage.")
+        if run_mode == RunMode.TRAIN and self.role == ModelRole.REPLAY_ONLY:
+             raise RuntimeError(f"Model with role {self.role} is for REPLAY only, not training.")
+
     def forward(
         self,
         x_price_1m: torch.Tensor,
         x_price_5m: torch.Tensor,
         x_price_15m: torch.Tensor,
-        x_context: torch.Tensor
+        x_context: torch.Tensor,
+        run_mode: Optional[RunMode] = None
     ) -> torch.Tensor:
         """
         Forward pass.
@@ -72,10 +84,14 @@ class FusionModel(nn.Module):
         Args:
             x_price_*: Price windows (batch, channels, length)
             x_context: Context vector (batch, context_dim)
+            run_mode: Optional current run mode for enforcement
             
         Returns:
             Logits (batch, num_classes)
         """
+        if run_mode:
+            self.check_can_run(run_mode)
+            
         # Encode price
         price_emb = self.price_encoder(x_price_1m, x_price_5m, x_price_15m)
         
@@ -95,10 +111,11 @@ class FusionModel(nn.Module):
         x_price_1m: torch.Tensor,
         x_price_5m: torch.Tensor,
         x_price_15m: torch.Tensor,
-        x_context: torch.Tensor
+        x_context: torch.Tensor,
+        run_mode: Optional[RunMode] = None
     ) -> torch.Tensor:
         """Get probability of WIN class."""
-        logits = self.forward(x_price_1m, x_price_5m, x_price_15m, x_context)
+        logits = self.forward(x_price_1m, x_price_5m, x_price_15m, x_context, run_mode=run_mode)
         probs = torch.softmax(logits, dim=-1)
         return probs[:, 1] if self.num_classes == 2 else probs  # P(WIN)
 

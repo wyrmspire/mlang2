@@ -19,6 +19,8 @@ class VizWindow:
     x_price_1m: List[List[float]] = field(default_factory=list)  # (lookback, 5)
     x_price_5m: List[List[float]] = field(default_factory=list)
     x_price_15m: List[List[float]] = field(default_factory=list)
+    x_price_1h: List[List[float]] = field(default_factory=list)   # 1-hour timeframe
+    x_price_4h: List[List[float]] = field(default_factory=list)   # 4-hour timeframe
     x_context: List[float] = field(default_factory=list)
     
     # Raw OHLCV for chart display (not normalized)
@@ -39,6 +41,8 @@ class VizWindow:
             'x_price_1m': self.x_price_1m,
             'x_price_5m': self.x_price_5m,
             'x_price_15m': self.x_price_15m,
+            'x_price_1h': self.x_price_1h,
+            'x_price_4h': self.x_price_4h,
             'x_context': self.x_context,
             'raw_ohlcv_1m': self.raw_ohlcv_1m,
             'future_price_1m': self.future_price_1m,

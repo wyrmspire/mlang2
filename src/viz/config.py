@@ -20,6 +20,8 @@ class VizConfig:
     window_lookback_1m: int = 120
     window_lookback_5m: int = 24
     window_lookback_15m: int = 8
+    window_lookback_1h: int = 24   # 24 hours of 1h bars
+    window_lookback_4h: int = 12   # 48 hours of 4h bars
     
     # Output format
     output_format: str = "jsonl"  # 'json' or 'jsonl'
@@ -33,6 +35,8 @@ class VizConfig:
             'window_lookback_1m': self.window_lookback_1m,
             'window_lookback_5m': self.window_lookback_5m,
             'window_lookback_15m': self.window_lookback_15m,
+            'window_lookback_1h': self.window_lookback_1h,
+            'window_lookback_4h': self.window_lookback_4h,
             'output_format': self.output_format,
             'compress': self.compress,
         }

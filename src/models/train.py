@@ -14,6 +14,7 @@ from enum import Enum
 import numpy as np
 
 from src.config import MODELS_DIR
+from src.experiments.config import RunMode
 
 
 class ImbalanceStrategy(Enum):
@@ -112,7 +113,7 @@ def train_epoch(
         optimizer.zero_grad()
         
         # Forward
-        logits = model(x_1m, x_5m, x_15m, x_context)
+        logits = model(x_1m, x_5m, x_15m, x_context, run_mode=RunMode.TRAIN)
         loss = criterion(logits, y)
         
         # Backward
@@ -144,7 +145,7 @@ def validate(
             x_context = batch['x_context'].to(device)
             y = batch['y'].squeeze().to(device)
             
-            logits = model(x_1m, x_5m, x_15m, x_context)
+            logits = model(x_1m, x_5m, x_15m, x_context, run_mode=RunMode.TRAIN)
             loss = criterion(logits, y)
             
             total_loss += loss.item()
