@@ -209,6 +209,21 @@ async def get_trades(run_id: str) -> List[Dict[str, Any]]:
     return trades
 
 
+@app.get("/runs/{run_id}/series")
+async def get_full_series(run_id: str) -> Dict[str, Any]:
+    """Get full OHLCV series for global timeline view."""
+    run_dir = find_run_dir(run_id)
+    if not run_dir:
+        raise HTTPException(404, f"Run {run_id} not found")
+    
+    series_file = run_dir / "full_series.json"
+    if not series_file.exists():
+        return {"timeframe": "1m", "bars": [], "trade_markers": []}
+    
+    with open(series_file) as f:
+        return json.load(f)
+
+
 # =============================================================================
 # ENDPOINTS: Agent Chat
 # =============================================================================
@@ -326,10 +341,14 @@ async def agent_chat(request: ChatRequest) -> AgentResponse:
 # =============================================================================
 
 class RunStrategyRequest(BaseModel):
-    strategy: str = "opening_range"  # Strategy name
-    start_date: str = "2025-03-17"
-    weeks: int = 3
+    # Backwards compatible simple params
+    strategy: Optional[str] = "opening_range"  # Strategy name
+    start_date: Optional[str] = "2025-03-17"
+    weeks: Optional[int] = 3
     run_name: Optional[str] = None
+    
+    # New: Full strategy config (takes precedence if provided)
+    config: Optional[Dict[str, Any]] = None
 
 
 @app.post("/agent/run-strategy")
@@ -337,31 +356,55 @@ async def run_strategy(request: RunStrategyRequest) -> Dict[str, Any]:
     """
     Run a strategy and create a new dataset.
     This allows the agent to create data directly from the chat.
+    
+    Accepts either:
+    1. Simple params (strategy, start_date, weeks) - backwards compatible
+    2. Full StrategyConfig object in 'config' field - new flexible approach
     """
     import subprocess
     from datetime import datetime
     
+    # Determine strategy name
+    strategy_id = None
+    if request.config:
+        strategy_id = request.config.get('strategy_id', 'opening_range')
+    else:
+        strategy_id = request.strategy or 'opening_range'
+    
     # Generate run name if not provided
-    run_name = request.run_name or f"{request.strategy}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    run_name = request.run_name or f"{strategy_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     
     # Map strategy to script
     scripts = {
         "opening_range": "scripts/run_or_multi_oco.py",
         "or": "scripts/run_or_multi_oco.py",
+        "always": "scripts/run_or_multi_oco.py",  # Can handle different scanners
     }
     
-    script = scripts.get(request.strategy)
+    script = scripts.get(strategy_id)
     if not script:
-        return {"success": False, "error": f"Unknown strategy: {request.strategy}"}
+        return {"success": False, "error": f"Unknown strategy: {strategy_id}"}
     
     # Build command
     out_dir = RESULTS_DIR / run_name
-    cmd = [
-        "python", script,
-        "--start-date", request.start_date,
-        "--weeks", str(request.weeks),
-        "--out", str(out_dir)
-    ]
+    
+    if request.config:
+        # New approach: use StrategyConfig
+        from src.experiments.strategy_config import StrategyConfig
+        
+        try:
+            config = StrategyConfig.from_dict(request.config)
+            cmd = ["python", script] + config.to_cli_args() + ["--out", str(out_dir)]
+        except Exception as e:
+            return {"success": False, "error": f"Invalid config: {str(e)}"}
+    else:
+        # Backwards compatible: simple params
+        cmd = [
+            "python", script,
+            "--start-date", request.start_date or "2025-03-17",
+            "--weeks", str(request.weeks or 3),
+            "--out", str(out_dir)
+        ]
     
     try:
         # Run strategy (blocking for now, could make async)
