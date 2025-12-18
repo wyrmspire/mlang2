@@ -54,10 +54,10 @@ export const CandleChart: React.FC<CandleChartProps> = ({ decision, trade }) => 
     const chartRef = useRef<IChartApi | null>(null);
     const seriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
 
-    // References for OCO lines
-    const entryLineRef = useRef<any>(null);
-    const stopLineRef = useRef<any>(null);
-    const tpLineRef = useRef<any>(null);
+    // References for OCO zones
+    const entryZoneRef = useRef<any>(null);
+    const stopZoneRef = useRef<any>(null);
+    const tpZoneRef = useRef<any>(null);
 
     const [timeframe, setTimeframe] = useState<Timeframe>('1m');
 
@@ -145,39 +145,66 @@ export const CandleChart: React.FC<CandleChartProps> = ({ decision, trade }) => 
 
         seriesRef.current.setData(chartData);
 
-        // Remove old lines
-        if (entryLineRef.current) { seriesRef.current.removePriceLine(entryLineRef.current); entryLineRef.current = null; }
-        if (stopLineRef.current) { seriesRef.current.removePriceLine(stopLineRef.current); stopLineRef.current = null; }
-        if (tpLineRef.current) { seriesRef.current.removePriceLine(tpLineRef.current); tpLineRef.current = null; }
+        // Remove old zones
+        if (entryZoneRef.current) { chartRef.current?.removeSeries(entryZoneRef.current); entryZoneRef.current = null; }
+        if (stopZoneRef.current) { chartRef.current?.removeSeries(stopZoneRef.current); stopZoneRef.current = null; }
+        if (tpZoneRef.current) { chartRef.current?.removeSeries(tpZoneRef.current); tpZoneRef.current = null; }
 
-        // Add OCO Lines if present
-        if (decision.oco) {
-            entryLineRef.current = seriesRef.current.createPriceLine({
-                price: decision.oco.entry_price,
-                color: '#3b82f6', // blue
-                lineWidth: 2,
-                lineStyle: 0, // Solid
-                axisLabelVisible: true,
-                title: 'ENTRY',
-            });
-
-            stopLineRef.current = seriesRef.current.createPriceLine({
-                price: decision.oco.stop_price,
-                color: '#ef4444', // red
-                lineWidth: 2,
-                lineStyle: 2, // Dashed
-                axisLabelVisible: true,
-                title: 'STOP',
-            });
-
-            tpLineRef.current = seriesRef.current.createPriceLine({
-                price: decision.oco.tp_price,
-                color: '#22c55e', // green
-                lineWidth: 2,
-                lineStyle: 2, // Dashed
-                axisLabelVisible: true,
-                title: 'TP',
-            });
+        // Add OCO Zones if present (bounded rectangles, not infinite lines)
+        if (decision.oco && chartRef.current) {
+            const oco = decision.oco;
+            
+            // Calculate zone boundaries based on decision time and max_bars
+            const aggregatedDecisionIdx = Math.floor(60 / intervalMap[timeframe]);
+            const decisionTime = chartData[aggregatedDecisionIdx]?.time;
+            
+            // Zone extends from decision time to decision time + max_bars (or end of data)
+            const maxBarsAggregated = Math.ceil((oco.max_bars || 200) / intervalMap[timeframe]);
+            const endIdx = Math.min(aggregatedDecisionIdx + maxBarsAggregated, chartData.length - 1);
+            const endTime = chartData[endIdx]?.time;
+            
+            if (decisionTime && endTime) {
+                // Entry zone (small band around entry price)
+                const entryBand = oco.atr_at_creation * 0.1; // 0.1 ATR band
+                entryZoneRef.current = chartRef.current.addLineSeries({
+                    color: 'rgba(59, 130, 246, 0.15)', // blue with transparency
+                    lineWidth: 0,
+                    priceLineVisible: false,
+                    lastValueVisible: false,
+                });
+                entryZoneRef.current.setData([
+                    { time: decisionTime, value: oco.entry_price },
+                    { time: endTime, value: oco.entry_price },
+                ]);
+                
+                // Stop zone (area from entry to stop)
+                stopZoneRef.current = chartRef.current.addAreaSeries({
+                    topColor: 'rgba(239, 68, 68, 0.2)', // red with transparency
+                    bottomColor: 'rgba(239, 68, 68, 0.05)',
+                    lineColor: 'rgba(239, 68, 68, 0.6)',
+                    lineWidth: 2,
+                    priceLineVisible: false,
+                    lastValueVisible: false,
+                });
+                stopZoneRef.current.setData([
+                    { time: decisionTime, value: oco.stop_price },
+                    { time: endTime, value: oco.stop_price },
+                ]);
+                
+                // TP zone (area from entry to TP)
+                tpZoneRef.current = chartRef.current.addAreaSeries({
+                    topColor: 'rgba(34, 197, 94, 0.2)', // green with transparency
+                    bottomColor: 'rgba(34, 197, 94, 0.05)',
+                    lineColor: 'rgba(34, 197, 94, 0.6)',
+                    lineWidth: 2,
+                    priceLineVisible: false,
+                    lastValueVisible: false,
+                });
+                tpZoneRef.current.setData([
+                    { time: decisionTime, value: oco.tp_price },
+                    { time: endTime, value: oco.tp_price },
+                ]);
+            }
         }
 
         // Add Decision Time Marker

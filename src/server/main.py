@@ -209,6 +209,21 @@ async def get_trades(run_id: str) -> List[Dict[str, Any]]:
     return trades
 
 
+@app.get("/runs/{run_id}/series")
+async def get_full_series(run_id: str) -> Dict[str, Any]:
+    """Get full OHLCV series for global timeline view."""
+    run_dir = find_run_dir(run_id)
+    if not run_dir:
+        raise HTTPException(404, f"Run {run_id} not found")
+    
+    series_file = run_dir / "full_series.json"
+    if not series_file.exists():
+        return {"timeframe": "1m", "bars": [], "trade_markers": []}
+    
+    with open(series_file) as f:
+        return json.load(f)
+
+
 # =============================================================================
 # ENDPOINTS: Agent Chat
 # =============================================================================
