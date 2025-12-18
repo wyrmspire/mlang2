@@ -1,0 +1,72 @@
+# Node
+node_modules/
+dist/
+build/
+.npm/
+yarn-error.log
+.pnp.*
+.cache/
+
+# TypeScript
+*.tsbuildinfo
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+env/
+.venv/
+pip-wheel-metadata/
+*.egg-info/
+build/
+dist/
+.eggs/
+*.egg
+.python-version
+ipynb_checkpoints/
+.pytest_cache/
+.mypy_cache/
+
+# Jupyter
+.ipynb_checkpoints
+
+# ML artifacts
+*.pth
+*.pt
+*.ckpt
+models/
+cnn_filter.pth
+best_model.pth
+
+# Data, results, caches, shards
+results/
+shards/
+cache/
+cache/**
+data/processed/
+data/raw/
+
+# Logs and runtime
+*.log
+logs/
+.env
+secrets.env
+
+# System files
+.DS_Store
+Thumbs.db
+
+# IDEs
+.vscode/
+.idea/
+
+# Test outputs
+test_output.txt
+cnn_results.txt
+
+# Misc
+*.sqlite3
+*.db
+coverage/
+coverage.*
