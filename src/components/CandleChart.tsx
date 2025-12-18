@@ -110,10 +110,9 @@ export const CandleChart: React.FC<CandleChartProps> = ({ decision, trade }) => 
     useEffect(() => {
         if (!seriesRef.current || !decision) return;
 
-        // Handle both formats: decision.window.x_price_1m (viz export) and decision.x_price_1m (OR export)
-        const rawData = decision.window?.x_price_1m || (decision as any).x_price_1m;
-        // Also get future data
-        const futureData = decision.window?.future_price_1m || [];
+        // Use RAW OHLCV data (not normalized CNN input) for chart display
+        // Fall back to x_price_1m for backward compatibility with old data
+        const rawData = decision.window?.raw_ohlcv_1m || decision.window?.x_price_1m || (decision as any).x_price_1m;
 
         if (!rawData || rawData.length === 0) return;
 
@@ -121,48 +120,28 @@ export const CandleChart: React.FC<CandleChartProps> = ({ decision, trade }) => 
         const intervalMap = { '1m': 1, '5m': 5, '15m': 15 };
         const interval = intervalMap[timeframe];
 
-        // Process Historical
-        const processedHistory = aggregateData(rawData, interval);
-
-        // Process Future (only if 1m timeframe, or aggregate if we want strictness, 
-        // but typically future data is 1m. Let's aggregate it too for consistency)
-        const processedFuture = aggregateData(futureData, interval);
+        // Process data (already includes history + future in raw_ohlcv_1m)
+        const processedData = aggregateData(rawData, interval);
 
         // Calculate Timestamps
-        // We assume the last data point of HISTORY corresponds to the decision timestamp.
+        // raw_ohlcv_1m has 60 bars before decision + 20 after
+        // Decision is at index 60 (0-indexed), so bar 60 is decision time
+        const decisionBarIndex = Math.min(60, rawData.length - 1);
         const baseTime = new Date(decision.timestamp || Date.now()).getTime() / 1000;
 
-        // Map History (Backwards from baseTime)
-        const historyCharts = processedHistory.map((d, i) => {
-            const offset = processedHistory.length - 1 - i;
+        // Map all bars with correct timestamps
+        const chartData = processedData.map((d, i) => {
+            // Calculate offset from decision bar after aggregation
+            const aggregatedDecisionIdx = Math.floor(decisionBarIndex / interval);
+            const offset = aggregatedDecisionIdx - i;
             return {
                 time: (baseTime - (offset * interval * 60)) as Time,
                 open: d[0],
                 high: d[1],
                 low: d[2],
                 close: d[3],
-                // color: undefined 
             };
         });
-
-        // Map Future (Forwards from baseTime)
-        // first future bar is baseTime + interval
-        const futureCharts = processedFuture.map((d, i) => {
-            // i=0 is the first interval AFTER decision
-            const offset = i + 1;
-            return {
-                time: (baseTime + (offset * interval * 60)) as Time,
-                open: d[0],
-                high: d[1],
-                low: d[2],
-                close: d[3],
-                // Optional: distinct color/wick for future?
-                // For now, let's keep them standard but maybe we can add a vertical line separator
-            };
-        });
-
-        // Combine and Sort (just in case)
-        const chartData = [...historyCharts, ...futureCharts].sort((a, b) => (a.time as number) - (b.time as number));
 
         seriesRef.current.setData(chartData);
 
@@ -202,23 +181,22 @@ export const CandleChart: React.FC<CandleChartProps> = ({ decision, trade }) => 
         }
 
         // Add Decision Time Marker
-        // The decision time is exactly at the end of the history data. 
-        // effectively 'baseTime'.
-        // We can add a vertical histogram or just a marker. 
-        // Lightweight charts doesn't have "vertical line" primitive easily mixed with candles 
-        // except via a separate Histogram series or Markers.
-        // Let's use a Marker on the last historical bar.
-        const lastHistoryTime = historyCharts[historyCharts.length - 1].time;
+        // The decision bar is at decisionBarIndex in original data
+        // After aggregation, figure out which chartData index that corresponds to
+        const aggregatedDecisionIdx = Math.floor(60 / intervalMap[timeframe]);
+        const markerBar = chartData[aggregatedDecisionIdx];
 
-        seriesRef.current.setMarkers([
-            {
-                time: lastHistoryTime,
-                position: 'aboveBar',
-                color: '#f59e0b', // amber
-                shape: 'arrowDown',
-                text: 'Signal',
-            }
-        ]);
+        if (markerBar) {
+            seriesRef.current.setMarkers([
+                {
+                    time: markerBar.time,
+                    position: 'aboveBar',
+                    color: '#f59e0b', // amber
+                    shape: 'arrowDown',
+                    text: 'Signal',
+                }
+            ]);
+        }
 
         if (chartRef.current) {
             chartRef.current.timeScale().fitContent();

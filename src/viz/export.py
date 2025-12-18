@@ -78,7 +78,9 @@ class Exporter:
         features: Optional[FeatureBundle] = None,
         model_logits: Optional[List[float]] = None,
         model_probs: Optional[List[float]] = None,
-        future_1m: Optional[List[List[float]]] = None
+        future_1m: Optional[List[List[float]]] = None,
+        raw_ohlcv: Optional[List[List[float]]] = None,
+        indicators: Optional[Dict[str, float]] = None
     ):
         """Record a decision point."""
         viz_decision = VizDecision(
@@ -108,7 +110,9 @@ class Exporter:
                 x_price_5m=features.x_price_5m.tolist() if features.x_price_5m is not None else [],
                 x_price_15m=features.x_price_15m.tolist() if features.x_price_15m is not None else [],
                 x_context=features.x_context.tolist() if features.x_context is not None else [],
-                future_price_1m=future_1m or []
+                raw_ohlcv_1m=raw_ohlcv or [],
+                future_price_1m=future_1m or [],
+                indicators=indicators or {}
             )
         
         self.decisions.append(viz_decision)

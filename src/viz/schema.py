@@ -15,13 +15,20 @@ class VizWindow:
     OHLCV windows captured at decision time.
     Used by the UI to render "what the model saw".
     """
+    # Normalized model inputs (for "Model View")
     x_price_1m: List[List[float]] = field(default_factory=list)  # (lookback, 5)
     x_price_5m: List[List[float]] = field(default_factory=list)
     x_price_15m: List[List[float]] = field(default_factory=list)
     x_context: List[float] = field(default_factory=list)
     
+    # Raw OHLCV for chart display (not normalized)
+    raw_ohlcv_1m: List[List[float]] = field(default_factory=list)  # [o, h, l, c, v] per bar
+    
     # Future context for post-analysis
     future_price_1m: List[List[float]] = field(default_factory=list)
+    
+    # Indicators at decision time
+    indicators: Dict[str, float] = field(default_factory=dict)  # ema, atr, rsi, etc.
     
     # Normalization metadata for denormalization in UI
     norm_method: str = "zscore"
@@ -33,7 +40,9 @@ class VizWindow:
             'x_price_5m': self.x_price_5m,
             'x_price_15m': self.x_price_15m,
             'x_context': self.x_context,
+            'raw_ohlcv_1m': self.raw_ohlcv_1m,
             'future_price_1m': self.future_price_1m,
+            'indicators': self.indicators,
             'norm_method': self.norm_method,
             'norm_params': self.norm_params,
         }

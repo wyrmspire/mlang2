@@ -186,21 +186,37 @@ def run_experiment(
         
         # === VIZ EXPORT HOOK ===
         if exporter:
-            # Extract future context (next 60 1m bars)
-            future_bars = []
             curr_idx = step.bar_idx
-            # We want [curr_idx+1 : curr_idx+61]
-            # Need to be careful about bounds
-            end_future_idx = min(len(df), curr_idx + 61)
+            
+            # Extract RAW OHLCV for chart: 60 bars before + 20 bars after
+            start_raw_idx = max(0, curr_idx - 60)
+            end_raw_idx = min(len(df), curr_idx + 21)  # +1 for current bar, +20 future
+            raw_slice = df.iloc[start_raw_idx : end_raw_idx]
+            raw_ohlcv = raw_slice[['open', 'high', 'low', 'close', 'volume']].values.tolist()
+            
+            # Extract future bars separately (for compatibility)
+            future_bars = []
+            end_future_idx = min(len(df), curr_idx + 21)
             if end_future_idx > curr_idx + 1:
-                # Get fields: open, high, low, close, volume (normalized or raw? Viz expects raw usually for candle chart)
-                # But VizWindow schema implies lists.
-                # Let's grab raw OHLCV from df
-                slice_df = df.iloc[curr_idx+1 : end_future_idx]
-                # Convert to list of lists [o, h, l, c, v]
-                future_bars = slice_df[['open', 'high', 'low', 'close', 'volume']].values.tolist()
+                future_slice = df.iloc[curr_idx+1 : end_future_idx]
+                future_bars = future_slice[['open', 'high', 'low', 'close', 'volume']].values.tolist()
+            
+            # Extract indicator values for overlay
+            ind = features.indicators
+            indicators_dict = {}
+            if ind:
+                indicators_dict = {
+                    'ema': ind.ema_5m_20,
+                    'atr': ind.atr_5m_14,
+                    'rsi': ind.rsi_5m_14,
+                }
 
-            exporter.on_decision(record, features, future_1m=future_bars)
+            exporter.on_decision(
+                record, features, 
+                future_1m=future_bars,
+                raw_ohlcv=raw_ohlcv,
+                indicators=indicators_dict
+            )
             
             # Export Bracket if trade
             if record.action == Action.PLACE_ORDER:
@@ -212,41 +228,31 @@ def run_experiment(
                 )
                 exporter.on_bracket_created(record.decision_id, bracket)
         
-from src.datasets.trade_record import TradeRecord
-
-# ... (inside run_experiment imports)
-
-# ... (inside run_experiment loop)
-        
         # Update cooldown if trade placed
         if record.action == Action.PLACE_ORDER:
             cooldown.record_trade(step.bar_idx, cf_label.outcome, features.timestamp)
             
             # Export Trade Record for Viz
             if exporter:
-                # We need to approximate entry/exit times from bars since we don't have exact simulation step-by-step 
-                # for the trade lifecycle here (it's labeled instantly).
-                # We can use the decision time as entry, and approximate exit time.
-                
                 # Approximate exit bar
                 exit_bar = step.bar_idx + record.cf_bars_held
-                exit_time = features.timestamp + pd.Timedelta(minutes=record.cf_bars_held) # Approx for 1m
+                exit_time = features.timestamp + pd.Timedelta(minutes=record.cf_bars_held)
                 
                 trade = TradeRecord(
                     trade_id=str(uuid.uuid4())[:8],
                     decision_id=record.decision_id,
                     entry_time=features.timestamp,
                     entry_bar=step.bar_idx,
-                    entry_price=features.current_price, # Approx (limit order might be different but close)
+                    entry_price=features.current_price,
                     direction=config.oco_config.direction,
                     exit_time=exit_time,
                     exit_bar=exit_bar,
-                    exit_price=features.current_price + (record.cf_pnl / (1 if config.oco_config.direction=="LONG" else -1)), # Rough approx
-                    exit_reason=record.cf_outcome, # WIN/LOSS/TIMEOUT
+                    exit_price=features.current_price + (record.cf_pnl / (1 if config.oco_config.direction=="LONG" else -1)),
+                    exit_reason=record.cf_outcome,
                     outcome=record.cf_outcome,
                     pnl_points=record.cf_pnl,
                     pnl_dollars=record.cf_pnl_dollars,
-                    r_multiple=record.cf_pnl_dollars / (features.atr * config.oco_config.stop_atr * 50), # Approx
+                    r_multiple=record.cf_pnl_dollars / (features.atr * config.oco_config.stop_atr * 50) if features.atr > 0 else 0,
                     bars_held=record.cf_bars_held,
                     mae=record.cf_mae,
                     mfe=record.cf_mfe,
