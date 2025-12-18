@@ -7,7 +7,7 @@ interface CandleChartProps {
     trade: VizTrade | null;
 }
 
-type Timeframe = '1m' | '5m' | '15m';
+type Timeframe = '1m' | '5m' | '15m' | '1h' | '4h';
 
 // Aggregation helper: turns 1m candles into Xm candles
 // data: [open, high, low, close, volume]
@@ -117,7 +117,7 @@ export const CandleChart: React.FC<CandleChartProps> = ({ decision, trade }) => 
         if (!rawData || rawData.length === 0) return;
 
         // Determine aggregation interval
-        const intervalMap = { '1m': 1, '5m': 5, '15m': 15 };
+        const intervalMap = { '1m': 1, '5m': 5, '15m': 15, '1h': 60, '4h': 240 };
         const interval = intervalMap[timeframe];
 
         // Process data (already includes history + future in raw_ohlcv_1m)
@@ -210,14 +210,14 @@ export const CandleChart: React.FC<CandleChartProps> = ({ decision, trade }) => 
 
             {/* Timeframe Controls */}
             <div className="absolute top-3 right-3 flex bg-slate-800 rounded-md border border-slate-700 shadow-lg overflow-hidden z-10">
-                {(['1m', '5m', '15m'] as Timeframe[]).map((tf) => (
+                {(['1m', '5m', '15m', '1h', '4h'] as Timeframe[]).map((tf) => (
                     <button
                         key={tf}
                         onClick={() => setTimeframe(tf)}
                         className={`px-3 py-1 text-xs font-bold transition-colors ${timeframe === tf
                             ? 'bg-blue-600 text-white'
                             : 'bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-slate-200'
-                            } ${tf !== '15m' ? 'border-r border-slate-700' : ''}`}
+                            } ${tf !== '4h' ? 'border-r border-slate-700' : ''}`}
                     >
                         {tf}
                     </button>
