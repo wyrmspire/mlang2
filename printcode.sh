@@ -128,22 +128,34 @@ done
 
 # Split into chunks
 total_lines=$(wc -l < "$TEMP_FILE")
-num_files=$(( (total_lines + LINES_PER_FILE - 1) / LINES_PER_FILE ))
+
+# Limit to 10 files (0-9) - calculate lines per file to fit everything
+MAX_FILES=10
+LINES_PER_FILE=$(( (total_lines + MAX_FILES - 1) / MAX_FILES ))
+# Ensure minimum of 100 lines per file
+if (( LINES_PER_FILE < 100 )); then
+    LINES_PER_FILE=100
+fi
 
 echo "Total lines: $total_lines"
-echo "Splitting into $num_files files..."
+echo "Lines per file: $LINES_PER_FILE (targeting $MAX_FILES files)"
 
 # Remove old dump files
 rm -f "$PROJECT_ROOT"/${OUTPUT_PREFIX}*.md
 rm -f "$PROJECT_ROOT"/${OUTPUT_PREFIX}[0-9]*
 
-# Split (use 2-digit suffix to handle more files)
+# Split (use 2-digit suffix)
 split -l $LINES_PER_FILE -d -a 2 "$TEMP_FILE" "$PROJECT_ROOT/${OUTPUT_PREFIX}"
 
-# Rename to .md
+# Rename to .md and remove empty files
 for f in "$PROJECT_ROOT"/${OUTPUT_PREFIX}*; do
     if [[ ! "$f" =~ \.md$ ]]; then
-        mv "$f" "${f}.md"
+        # Check if file is empty
+        if [[ -s "$f" ]]; then
+            mv "$f" "${f}.md"
+        else
+            rm -f "$f"
+        fi
     fi
 done
 
@@ -151,4 +163,4 @@ done
 rm -f "$TEMP_FILE"
 
 echo "Done! Created:"
-ls -la "$PROJECT_ROOT"/${OUTPUT_PREFIX}*.md
+ls -la "$PROJECT_ROOT"/${OUTPUT_PREFIX}*.md 2>/dev/null || echo "No files created"
