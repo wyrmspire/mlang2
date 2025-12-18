@@ -45,6 +45,38 @@ def make_serializable(obj):
     return obj
 
 
+def get_raw_ohlcv_window(stepper: MarketStepper, lookback: int = 60, lookahead: int = 20):
+    """
+    Get raw OHLCV window around current position for visualization.
+    
+    Args:
+        stepper: MarketStepper at current position
+        lookback: Number of bars before current position
+        lookahead: Number of bars after current position (future, for viz only)
+        
+    Returns:
+        List of [open, high, low, close, volume] for each bar
+    """
+    df = stepper.df
+    current_idx = stepper.current_idx
+    
+    # Get history (causal - this is what the model sees)
+    start_idx = max(0, current_idx - lookback)
+    history = df.iloc[start_idx:current_idx + 1]
+    
+    # Get future (for viz only - NOT for model/training)
+    end_idx = min(len(df), current_idx + lookahead + 1)
+    future = df.iloc[current_idx + 1:end_idx]
+    
+    # Combine history + future
+    combined = pd.concat([history, future])
+    
+    return [
+        [float(r['open']), float(r['high']), float(r['low']), float(r['close']), float(r['volume'])]
+        for _, r in combined.iterrows()
+    ]
+
+
 def main():
     parser = argparse.ArgumentParser(description="Run Opening Range multi-OCO simulation with smart stops")
     parser.add_argument("--start-date", type=str, default="2025-03-17", help="Start date")
@@ -183,32 +215,55 @@ def main():
                 best_pnl = result['pnl_dollars']
                 best_oco = name
         
-        # Build CNN-ready record
+        # Get raw OHLCV for visualization (60 bars before + 20 after decision)
+        raw_ohlcv = get_raw_ohlcv_window(stepper, lookback=60, lookahead=20)
+        
+        # Get best TP price for OCO visualization
+        best_tp_price = oco_results.get(best_oco, {}).get('tp_price', entry_price + risk) if best_oco else entry_price + risk
+        
+        # Build record with VizDecision-compatible structure
         record = {
             'decision_id': f"or_{decision_idx:04d}",
             'timestamp': features.timestamp.isoformat() if features.timestamp else None,
             'bar_idx': step.bar_idx,
             'index': decision_idx,
             
-            # Opening Range context
-            'or_high': or_high,
-            'or_low': or_low,
-            'direction': direction,
-            'retest_level': scan_result.context.get('retest_level', 0),
+            # Scanner identification (Phase .1 contract)
+            'scanner_id': 'opening_range',
+            'scanner_context': {
+                'or_high': or_high,
+                'or_low': or_low,
+                'direction': direction,
+                'retest_level': scan_result.context.get('retest_level', 0),
+            },
+            
+            # Market state
+            'current_price': entry_price,
+            'atr': atr,
             
             # Stop info
             'stop_price': stop_price,
             'stop_reason': stop_reason,
             'risk_points': risk,
             
-            # Market state
-            'current_price': entry_price,
-            'atr': atr,
+            # Window (VizWindow-compatible structure)
+            'window': {
+                'x_price_1m': features.x_price_1m.tolist() if features.x_price_1m is not None else [],
+                'raw_ohlcv_1m': raw_ohlcv,  # <-- KEY FIX: actual prices for chart
+                'x_context': features.x_context.tolist() if features.x_context is not None else [],
+            },
             
-            # CNN input: 30 1m bars before entry
-            'x_price_1m': features.x_price_1m.tolist() if features.x_price_1m is not None else [],
+            # OCO (VizOCO-compatible structure)
+            'oco': {
+                'entry_price': entry_price,
+                'stop_price': stop_price,
+                'tp_price': best_tp_price,
+                'direction': direction,
+                'atr_at_creation': atr,
+                'max_bars': 200,
+            },
             
-            # Multi-OCO results
+            # Multi-OCO results (for analysis/training)
             'oco_results': oco_results,
             
             # Best OCO (CNN classification target)
@@ -234,9 +289,9 @@ def main():
     if records:
         print("\n[6] Analysis:")
         
-        # Count by direction
-        long_count = sum(1 for r in records if r['direction'] == 'LONG')
-        short_count = sum(1 for r in records if r['direction'] == 'SHORT')
+        # Count by direction (now in scanner_context)
+        long_count = sum(1 for r in records if r['scanner_context']['direction'] == 'LONG')
+        short_count = sum(1 for r in records if r['scanner_context']['direction'] == 'SHORT')
         print(f"  LONG triggers: {long_count}")
         print(f"  SHORT triggers: {short_count}")
         
