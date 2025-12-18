@@ -14,7 +14,7 @@ from enum import Enum
 import numpy as np
 
 from src.config import MODELS_DIR
-from src.experiments.config import RunMode
+from src.core.enums import RunMode
 
 
 class ImbalanceStrategy(Enum):

@@ -16,7 +16,8 @@ import pandas as pd
 from pathlib import Path
 
 from src.sim.stepper import MarketStepper, StepResult
-from src.experiments.config import ReplayConfig, RunMode
+from src.experiments.config import ReplayConfig
+from src.core.enums import RunMode
 from src.policy.actions import Action, SkipReason
 
 

@@ -18,18 +18,7 @@ from src.models.train import TrainConfig
 from src.datasets.schema import DatasetSchema
 
 
-class RunMode(Enum):
-    """
-    Execution mode for the system.
-    
-    Controls what operations are permitted:
-    - TRAIN: Can peek at future data for labeling, can learn, cannot trade
-    - REPLAY: Cannot peek future, cannot learn, can simulate trades
-    - SCAN: Cannot peek future, cannot learn, cannot trade (read-only analysis)
-    """
-    TRAIN = "TRAIN"
-    REPLAY = "REPLAY"
-    SCAN = "SCAN"
+from src.core.enums import RunMode
 
 
 @dataclass

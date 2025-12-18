@@ -5,11 +5,11 @@ Combine CNN price encoders with context MLP.
 
 import torch
 import torch.nn as nn
+from typing import Optional
 
-from src.models import ModelRole
+from src.core.enums import ModelRole, RunMode
 from src.models.encoders import MultiTFEncoder
 from src.models.context_mlp import ContextMLP
-from src.experiments.config import RunMode
 
 
 class FusionModel(nn.Module):
