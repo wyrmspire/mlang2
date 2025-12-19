@@ -196,7 +196,7 @@ export const CandleChart: React.FC<CandleChartProps> = ({
     // Handle active decision - scroll to it and show position boxes
     useEffect(() => {
         if (!seriesRef.current || !chartRef.current) return;
-        if (!aggregatedBars.length) return;
+        if (!aggregatedBars.length || !continuousData?.bars?.length) return;
 
         // Remove old position boxes
         positionBoxesRef.current.forEach(box => {
@@ -212,9 +212,9 @@ export const CandleChart: React.FC<CandleChartProps> = ({
         const decisionBar = aggregatedBars[decisionIdx];
         if (!decisionBar) return;
 
-        // Scroll to decision with context
-        const fromIdx = Math.max(0, decisionIdx - 30);
-        const toIdx = Math.min(aggregatedBars.length - 1, decisionIdx + 20);
+        // Scroll to decision with context (more bars for better view)
+        const fromIdx = Math.max(0, decisionIdx - 50);
+        const toIdx = Math.min(aggregatedBars.length - 1, decisionIdx + 50);
 
         if (aggregatedBars[fromIdx] && aggregatedBars[toIdx]) {
             chartRef.current.timeScale().setVisibleRange({
@@ -231,23 +231,33 @@ export const CandleChart: React.FC<CandleChartProps> = ({
             const tpPrice = oco.tp_price;
             const direction = (activeDecision.scanner_context?.direction || oco.direction || 'LONG') as 'LONG' | 'SHORT';
 
-            // Calculate end time: either trade exit or decision + max_bars
+            // Calculate start time from decision timestamp
             const startTime = parseTime(decisionBar.time) as Time;
 
-            // Use trade exit if available, otherwise estimate based on max_bars or 50 bars default
-            let endIdx = decisionIdx + (oco.max_bars || 50);
-            if (trade?.exit_bar) {
-                // Find the exit bar in aggregated data
-                const intervalMap = { '1m': 1, '5m': 5, '15m': 15 };
-                const interval = intervalMap[timeframe];
-                endIdx = Math.floor(trade.exit_bar / interval);
+            // Calculate end time based on trade data or estimate
+            let endTime = startTime;
+            
+            if (trade?.exit_time) {
+                // Use actual exit timestamp from trade
+                endTime = parseTime(trade.exit_time) as Time;
+            } else if (trade?.bars_held) {
+                // Estimate end time: decision time + bars_held minutes (assuming 1m bars)
+                const decisionTimeMs = parseTime(decisionBar.time) * 1000;
+                const endTimeMs = decisionTimeMs + (trade.bars_held * 60 * 1000);
+                endTime = Math.floor(endTimeMs / 1000) as Time;
+            } else if (oco.max_bars) {
+                // Fallback: use max_bars from OCO
+                const decisionTimeMs = parseTime(decisionBar.time) * 1000;
+                const endTimeMs = decisionTimeMs + (oco.max_bars * 60 * 1000);
+                endTime = Math.floor(endTimeMs / 1000) as Time;
+            } else {
+                // Default: 50 bars (50 minutes)
+                const decisionTimeMs = parseTime(decisionBar.time) * 1000;
+                const endTimeMs = decisionTimeMs + (50 * 60 * 1000);
+                endTime = Math.floor(endTimeMs / 1000) as Time;
             }
-            endIdx = Math.min(endIdx, aggregatedBars.length - 1);
 
-            const endBar = aggregatedBars[endIdx];
-            const endTime = endBar ? parseTime(endBar.time) as Time : startTime;
-
-            // Create position boxes
+            // Create position boxes with actual timestamps
             const { slBox, tpBox, entryBox } = createTradePositionBoxes(
                 entryPrice,
                 stopPrice,
@@ -265,7 +275,7 @@ export const CandleChart: React.FC<CandleChartProps> = ({
             positionBoxesRef.current = [slBox, tpBox, entryBox];
         }
 
-    }, [activeDecision, trade, aggregatedBars, timeframe]);
+    }, [activeDecision, trade, aggregatedBars, timeframe, continuousData]);
 
     return (
         <div className="relative w-full h-full group">
