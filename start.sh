@@ -28,6 +28,15 @@ if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "win32" ]]; then
     taskkill //F //IM python.exe 2>/dev/null || true
     taskkill //F //IM pythonw.exe 2>/dev/null || true
     taskkill //F //IM node.exe 2>/dev/null || true
+    
+    # Also find and kill whatever is holding port 8000/8001 specifically
+    for port in 8000 8001; do
+        pid=$(netstat -ano | grep ":$port" | grep "LISTEN" | awk '{print $5}' | head -n 1)
+        if [ -n "$pid" ]; then
+            echo "    Killing process $pid on port $port..."
+            taskkill //F //PID $pid 2>/dev/null || true
+        fi
+    done
 else
     # Unix/Linux/Mac
     # Kill uvicorn/FastAPI processes
@@ -71,7 +80,7 @@ BACKEND_PID=$!
 
 # Wait for backend to be ready
 echo "    Waiting for backend..."
-for i in {1..10}; do
+for i in {1..30}; do
     if curl -s http://localhost:$BACKEND_PORT/health > /dev/null 2>&1; then
         echo "    Backend is ready on port $BACKEND_PORT!"
         break
