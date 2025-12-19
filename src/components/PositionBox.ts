@@ -170,12 +170,13 @@ export function createTradePositionBoxes(
     tpPrice: number,
     startTime: Time,
     endTime: Time,
-    direction: 'LONG' | 'SHORT'
+    direction: 'LONG' | 'SHORT',
+    tradeId: string = 'default'
 ): { slBox: PositionBox; tpBox: PositionBox; entryBox: PositionBox } {
 
     // SL Zone (red)
     const slBox = new PositionBox({
-        id: 'sl',
+        id: `sl_${tradeId}`,
         startTime,
         endTime,
         topPrice: Math.max(entryPrice, stopPrice),
@@ -189,7 +190,7 @@ export function createTradePositionBoxes(
 
     // TP Zone (green)
     const tpBox = new PositionBox({
-        id: 'tp',
+        id: `tp_${tradeId}`,
         startTime,
         endTime,
         topPrice: Math.max(entryPrice, tpPrice),
@@ -204,7 +205,7 @@ export function createTradePositionBoxes(
     // Entry line zone (thin blue box)
     const entryThickness = Math.abs(tpPrice - stopPrice) * 0.02; // 2% of range for visibility
     const entryBox = new PositionBox({
-        id: 'entry',
+        id: `entry_${tradeId}`,
         startTime,
         endTime,
         topPrice: entryPrice + entryThickness,

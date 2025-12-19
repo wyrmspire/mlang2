@@ -22,12 +22,27 @@ fi
 # Kill existing processes aggressively
 echo "[2] Killing all existing servers..."
 
-# Kill Python/uvicorn processes
-taskkill //F //IM python.exe 2>/dev/null || true
-taskkill //F //IM pythonw.exe 2>/dev/null || true
-
-# Kill Node/npm/vite processes  
-taskkill //F //IM node.exe 2>/dev/null || true
+# Detect OS and use appropriate kill commands
+if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "win32" ]]; then
+    # Windows
+    taskkill //F //IM python.exe 2>/dev/null || true
+    taskkill //F //IM pythonw.exe 2>/dev/null || true
+    taskkill //F //IM node.exe 2>/dev/null || true
+else
+    # Unix/Linux/Mac
+    # Kill uvicorn/FastAPI processes
+    pkill -f "uvicorn.*src.server.main" || true
+    pkill -f "python.*src.server.main" || true
+    
+    # Kill vite/npm dev server processes
+    pkill -f "vite" || true
+    pkill -f "npm.*run.*dev" || true
+    
+    # Kill any process listening on ports 8000, 8001, 3000
+    lsof -ti:8000 | xargs kill -9 2>/dev/null || true
+    lsof -ti:8001 | xargs kill -9 2>/dev/null || true
+    lsof -ti:3000 | xargs kill -9 2>/dev/null || true
+fi
 
 # Wait for ports to clear
 echo "    Waiting for ports to clear..."
@@ -35,9 +50,18 @@ sleep 2
 
 # Check if port 8000 is available, fallback to 8001
 BACKEND_PORT=8000
-if netstat -ano | grep -q ":8000.*LISTEN\|:8000.*ESTABLISHED\|:8000.*FIN_WAIT"; then
-    echo "    Port 8000 busy, using 8001..."
-    BACKEND_PORT=8001
+if command -v lsof &> /dev/null; then
+    # Unix/Linux/Mac with lsof
+    if lsof -Pi :8000 -sTCP:LISTEN -t >/dev/null 2>&1; then
+        echo "    Port 8000 busy, using 8001..."
+        BACKEND_PORT=8001
+    fi
+elif command -v netstat &> /dev/null; then
+    # Fallback to netstat
+    if netstat -ano 2>/dev/null | grep -q ":8000.*LISTEN\|:8000.*ESTABLISHED\|:8000.*FIN_WAIT"; then
+        echo "    Port 8000 busy, using 8001..."
+        BACKEND_PORT=8001
+    fi
 fi
 
 # Start backend
@@ -79,8 +103,15 @@ cleanup() {
     echo "Stopping services..."
     kill $BACKEND_PID 2>/dev/null || true
     kill $FRONTEND_PID 2>/dev/null || true
-    taskkill //F //IM python.exe 2>/dev/null || true
-    taskkill //F //IM node.exe 2>/dev/null || true
+    
+    # Detect OS and use appropriate kill commands
+    if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "win32" ]]; then
+        taskkill //F //IM python.exe 2>/dev/null || true
+        taskkill //F //IM node.exe 2>/dev/null || true
+    else
+        pkill -f "uvicorn.*src.server.main" || true
+        pkill -f "vite" || true
+    fi
     exit 0
 }
 

@@ -20,17 +20,34 @@ const App: React.FC = () => {
   const [decisions, setDecisions] = useState<VizDecision[]>([]);
   const [trades, setTrades] = useState<VizTrade[]>([]);
 
-  // Load continuous contract data on mount
+  // Load continuous contract data - reload when decisions change to match date range
   useEffect(() => {
     setContinuousLoading(true);
-    api.getContinuousContract().then(data => {
+    
+    // Calculate date range from decisions if available
+    let startDate: string | undefined;
+    let endDate: string | undefined;
+    
+    if (decisions.length > 0) {
+      const timestamps = decisions
+        .map(d => d.timestamp)
+        .filter((t): t is string => !!t)
+        .sort();
+      
+      if (timestamps.length > 0) {
+        startDate = timestamps[0];
+        endDate = timestamps[timestamps.length - 1];
+      }
+    }
+    
+    api.getContinuousContract(startDate, endDate).then(data => {
       setContinuousData(data);
       setContinuousLoading(false);
     }).catch(err => {
       console.error('Failed to load continuous data:', err);
       setContinuousLoading(false);
     });
-  }, []);
+  }, [decisions]);
 
   // Load run-specific data
   useEffect(() => {
@@ -173,6 +190,7 @@ const App: React.FC = () => {
             decisions={decisions}
             activeDecision={activeDecision}
             trade={activeTrade}
+            trades={trades}
           />
 
           {/* Floating Info Overlay */}
