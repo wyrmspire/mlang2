@@ -1,14 +1,37 @@
-import { VizDecision, VizTrade, RunManifest, AgentResponse, ChatMessage } from '../types/viz';
+import { VizDecision, VizTrade, RunManifest, AgentResponse, ChatMessage, ContinuousData } from '../types/viz';
 
-// API base URL - uses environment variable or defaults to localhost
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+// API base URL - auto-detect port (8000 or 8001)
+let API_BASE = import.meta.env.VITE_API_URL || '';
 
 // Flag to track if backend is available
 let backendAvailable: boolean | null = null;
 
-// Check backend availability
+// Check backend availability, auto-detecting port if needed
 async function checkBackend(): Promise<boolean> {
     if (backendAvailable !== null) return backendAvailable;
+
+    // If no explicit URL, try both ports
+    if (!API_BASE) {
+        for (const port of [8000, 8001]) {
+            try {
+                const response = await fetch(`http://localhost:${port}/health`, {
+                    method: 'GET',
+                    signal: AbortSignal.timeout(2000) // 2s timeout
+                });
+                if (response.ok) {
+                    API_BASE = `http://localhost:${port}`;
+                    console.log(`Backend detected on port ${port}`);
+                    backendAvailable = true;
+                    return true;
+                }
+            } catch {
+                // Try next port
+            }
+        }
+        backendAvailable = false;
+        return false;
+    }
+
     try {
         const response = await fetch(`${API_BASE}/health`, { method: 'GET' });
         backendAvailable = response.ok;
@@ -121,6 +144,44 @@ const mockData = createMockData();
 // API CLIENT
 // ============================================================================
 export const api = {
+    // Fetch continuous contract data for base chart
+    getContinuousContract: async (
+        start?: string,
+        end?: string,
+        timeframe: string = '1m'
+    ): Promise<ContinuousData> => {
+        const hasBackend = await checkBackend();
+        if (!hasBackend) {
+            // Return mock continuous data
+            const bars = generateMockCandles(500, 4500);
+            return {
+                timeframe,
+                count: bars.length,
+                bars: bars.map((b, i) => ({
+                    time: new Date(Date.now() - (500 - i) * 60000).toISOString(),
+                    open: b[0],
+                    high: b[1],
+                    low: b[2],
+                    close: b[3],
+                    volume: b[4]
+                }))
+            };
+        }
+        try {
+            const params = new URLSearchParams();
+            if (start) params.set('start', start);
+            if (end) params.set('end', end);
+            params.set('timeframe', timeframe);
+            const response = await fetch(`${API_BASE}/market/continuous?${params}`);
+            if (!response.ok) throw new Error('Failed to fetch continuous data');
+            return response.json();
+        } catch (e) {
+            console.error('Failed to fetch continuous contract:', e);
+            // Return empty data on error
+            return { timeframe, count: 0, bars: [] };
+        }
+    },
+
     getRuns: async (): Promise<string[]> => {
         const hasBackend = await checkBackend();
         if (!hasBackend) {

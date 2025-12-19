@@ -10,12 +10,14 @@ import os
 import json
 from pathlib import Path
 from typing import List, Dict, Any, Optional
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import httpx
 
 from src.config import RESULTS_DIR
+from src.data.loader import load_continuous_contract
+from src.data.resample import resample_all_timeframes
 
 
 app = FastAPI(title="MLang2 API", version="1.0.0")
@@ -222,6 +224,88 @@ async def get_full_series(run_id: str) -> Dict[str, Any]:
     
     with open(series_file) as f:
         return json.load(f)
+
+
+# =============================================================================
+# ENDPOINTS: Market Data (Continuous Contract)
+# =============================================================================
+
+@app.get("/market/continuous")
+async def get_continuous_contract(
+    start: Optional[str] = Query(None, description="Start date ISO format"),
+    end: Optional[str] = Query(None, description="End date ISO format"),
+    timeframe: str = Query("1m", description="Timeframe: 1m, 5m, 15m, 1h"),
+    limit: Optional[int] = Query(None, description="Max number of bars (default: 10000 for 1m)")
+) -> Dict[str, Any]:
+    """
+    Serve the continuous contract OHLCV data for chart rendering.
+    
+    This endpoint provides the base chart data that remains constant.
+    Strategy decisions are overlaid on top of this data.
+    
+    Default behavior: Returns last 4 weeks of data to prevent timeouts.
+    Use start/end params to specify a custom range.
+    """
+    import pandas as pd
+    from datetime import timedelta
+    
+    try:
+        df = load_continuous_contract()
+    except Exception as e:
+        raise HTTPException(500, f"Failed to load continuous contract: {str(e)}")
+    
+    # Default date range: last 4 weeks if no filters provided
+    if not start and not end:
+        # Get the most recent 4 weeks of data by default
+        if len(df) > 0:
+            latest_time = df['time'].max()
+            default_start = latest_time - timedelta(weeks=4)
+            df = df[df['time'] >= default_start]
+    
+    # Apply date filters if provided
+    if start:
+        try:
+            start_dt = pd.Timestamp(start)
+            if start_dt.tzinfo is None:
+                start_dt = start_dt.tz_localize('America/New_York')
+            df = df[df['time'] >= start_dt]
+        except Exception:
+            pass  # Ignore invalid date
+    
+    if end:
+        try:
+            end_dt = pd.Timestamp(end)
+            if end_dt.tzinfo is None:
+                end_dt = end_dt.tz_localize('America/New_York')
+            df = df[df['time'] <= end_dt]
+        except Exception:
+            pass
+    
+    # Resample if needed
+    if timeframe != "1m":
+        try:
+            htf_data = resample_all_timeframes(df)
+            if timeframe in htf_data:
+                df = htf_data[timeframe]
+        except Exception:
+            pass  # Fall back to 1m
+    
+    # Apply limit
+    default_limits = {'1m': 10000, '5m': 5000, '15m': 2000, '1h': 1000}
+    max_bars = limit or default_limits.get(timeframe, 10000)
+    if len(df) > max_bars:
+        df = df.tail(max_bars)
+    
+    # Fast conversion using to_dict
+    df_out = df.copy()
+    df_out['time'] = df_out['time'].apply(lambda t: t.isoformat() if hasattr(t, 'isoformat') else str(t))
+    bars = df_out[['time', 'open', 'high', 'low', 'close', 'volume']].to_dict('records')
+    
+    return {
+        "timeframe": timeframe,
+        "count": len(bars),
+        "bars": bars
+    }
 
 
 # =============================================================================

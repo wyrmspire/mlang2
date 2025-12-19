@@ -1,0 +1,21 @@
+src/api/client.ts(4,30): error TS2339: Property 'env' does not exist on type 'ImportMeta'.
+src/components/PositionBox.ts(15,5): error TS2724: '"lightweight-charts"' has no exported member named 'PrimitivePaneViewZOrder'. Did you mean 'SeriesPrimitivePaneViewZOrder'?
+src/components/PositionBox.ts(49,5): error TS2416: Property 'draw' in type 'PositionBoxRenderer' is not assignable to the same property in base type 'ISeriesPrimitivePaneRenderer'.
+  Type '(target: CanvasRenderingContext2D) => void' is not assignable to type '(target: CanvasRenderingTarget2D) => void'.
+    Types of parameters 'target' and 'target' are incompatible.
+      Type 'CanvasRenderingTarget2D' is missing the following properties from type 'CanvasRenderingContext2D': canvas, globalAlpha, globalCompositeOperation, drawImage, and 68 more.
+src/components/PositionBox.ts(96,13): error TS2322: Type 'PositionBoxRenderer' is not assignable to type 'ISeriesPrimitivePaneRenderer'.
+  Types of property 'draw' are incompatible.
+    Type '(target: CanvasRenderingContext2D) => void' is not assignable to type '(target: CanvasRenderingTarget2D) => void'.
+      Types of parameters 'target' and 'target' are incompatible.
+        Type 'CanvasRenderingTarget2D' is missing the following properties from type 'CanvasRenderingContext2D': canvas, globalAlpha, globalCompositeOperation, drawImage, and 68 more.
+src/components/PositionBox.ts(111,13): error TS2322: Type 'PositionBoxRenderer' is not assignable to type 'ISeriesPrimitivePaneRenderer'.
+  Types of property 'draw' are incompatible.
+    Type '(target: CanvasRenderingContext2D) => void' is not assignable to type '(target: CanvasRenderingTarget2D) => void'.
+      Types of parameters 'target' and 'target' are incompatible.
+        Type 'CanvasRenderingTarget2D' is missing the following properties from type 'CanvasRenderingContext2D': canvas, globalAlpha, globalCompositeOperation, drawImage, and 68 more.
+src/components/PositionBox.ts(115,9): error TS2322: Type 'PositionBoxRenderer' is not assignable to type 'ISeriesPrimitivePaneRenderer'.
+  Types of property 'draw' are incompatible.
+    Type '(target: CanvasRenderingContext2D) => void' is not assignable to type '(target: CanvasRenderingTarget2D) => void'.
+      Types of parameters 'target' and 'target' are incompatible.
+        Type 'CanvasRenderingTarget2D' is missing the following properties from type 'CanvasRenderingContext2D': canvas, globalAlpha, globalCompositeOperation, drawImage, and 68 more.

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { api } from './api/client';
-import { VizDecision, VizTrade, UIAction } from './types/viz';
+import { VizDecision, VizTrade, UIAction, ContinuousData } from './types/viz';
 import { RunPicker } from './components/RunPicker';
 import { Navigator } from './components/Navigator';
 import { CandleChart } from './components/CandleChart';
@@ -13,10 +13,26 @@ const App: React.FC = () => {
   const [index, setIndex] = useState<number>(0);
   const [showRawData, setShowRawData] = useState<boolean>(false);
 
+  // Continuous contract data (loaded once)
+  const [continuousData, setContinuousData] = useState<ContinuousData | null>(null);
+  const [continuousLoading, setContinuousLoading] = useState<boolean>(true);
+
   const [decisions, setDecisions] = useState<VizDecision[]>([]);
   const [trades, setTrades] = useState<VizTrade[]>([]);
 
-  // Data Loading
+  // Load continuous contract data on mount
+  useEffect(() => {
+    setContinuousLoading(true);
+    api.getContinuousContract().then(data => {
+      setContinuousData(data);
+      setContinuousLoading(false);
+    }).catch(err => {
+      console.error('Failed to load continuous data:', err);
+      setContinuousLoading(false);
+    });
+  }, []);
+
+  // Load run-specific data
   useEffect(() => {
     if (currentRun) {
       Promise.all([
@@ -107,14 +123,21 @@ const App: React.FC = () => {
         />
 
         <div className="flex-1 overflow-auto p-2">
-          {!currentRun ? (
+          {continuousLoading ? (
             <div className="p-4 text-sm text-slate-400 text-center">
-              <p>Select a run above to load data.</p>
-              <p className="mt-2 text-xs text-slate-500">Or use the chat to navigate.</p>
+              <p>Loading market data...</p>
+            </div>
+          ) : !currentRun ? (
+            <div className="p-4 text-sm text-slate-400 text-center">
+              <p>Select a run above to load overlays.</p>
+              <p className="mt-2 text-xs text-slate-500">
+                Chart shows continuous contract data.
+              </p>
             </div>
           ) : (
             <div className="p-4 text-xs text-slate-500 text-center">
-              Loaded {decisions.length} decisions, {trades.length} trades.
+              <div>📊 {continuousData?.count?.toLocaleString() || 0} bars loaded</div>
+              <div className="mt-1">📍 {decisions.length} decisions, {trades.length} trades</div>
             </div>
           )}
 
@@ -143,25 +166,26 @@ const App: React.FC = () => {
       {/* MAIN CONTENT */}
       <div className="flex-1 flex flex-col">
 
-        {/* CHART AREA */}
+        {/* CHART AREA - Now always shows continuous data */}
         <div className="flex-1 relative bg-slate-900">
-          {activeDecision && (activeDecision.window?.x_price_1m || (activeDecision as any).x_price_1m) ? (
-            <CandleChart decision={activeDecision} trade={activeTrade} />
-          ) : (
-            <div className="absolute inset-0 flex items-center justify-center text-slate-500">
-              <div className="text-center">
-                <p className="text-lg mb-2">No chart data available</p>
-                <p className="text-sm text-slate-600">Select a run and navigate to a decision</p>
-              </div>
-            </div>
-          )}
+          <CandleChart
+            continuousData={continuousData}
+            decisions={decisions}
+            activeDecision={activeDecision}
+            trade={activeTrade}
+          />
 
           {/* Floating Info Overlay */}
           {activeDecision && (
-            <div className="absolute top-4 left-4 bg-slate-800/80 backdrop-blur px-3 py-2 rounded border border-slate-700 text-xs shadow-lg pointer-events-none">
+            <div className="absolute top-4 left-4 bg-slate-800/80 backdrop-blur px-3 py-2 rounded border border-slate-700 text-xs shadow-lg pointer-events-none z-20">
               <div className="font-mono text-white">{activeDecision?.timestamp}</div>
               <div className="text-blue-400 font-bold">{activeDecision?.scanner_id || 'unknown'}</div>
               <div className="text-slate-400">Index: {activeDecision?.index}</div>
+              {activeDecision?.scanner_context?.direction && (
+                <div className={`font-bold ${activeDecision.scanner_context.direction === 'LONG' ? 'text-green-400' : 'text-red-400'}`}>
+                  {activeDecision.scanner_context.direction}
+                </div>
+              )}
             </div>
           )}
         </div>

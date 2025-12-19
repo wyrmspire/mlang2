@@ -1,3 +1,19 @@
+// Continuous contract data for base chart
+export interface BarData {
+  time: string;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+}
+
+export interface ContinuousData {
+  timeframe: string;
+  count: number;
+  bars: BarData[];
+}
+
 export interface VizWindow {
   x_price_1m: number[][]; // [open, high, low, close, volume]
   x_price_5m: number[][];

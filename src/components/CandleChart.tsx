@@ -1,66 +1,133 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { createChart, ColorType, IChartApi, ISeriesApi, Time } from 'lightweight-charts';
-import { VizDecision, VizTrade } from '../types/viz';
+import React, { useEffect, useRef, useState, useMemo } from 'react';
+import { createChart, ColorType, IChartApi, ISeriesApi, Time, SeriesMarker } from 'lightweight-charts';
+import { VizDecision, VizTrade, ContinuousData, BarData } from '../types/viz';
+import { PositionBox, createTradePositionBoxes } from './PositionBox';
 
 interface CandleChartProps {
-    decision: VizDecision | null;
-    trade: VizTrade | null;
+    continuousData: ContinuousData | null;  // Full contract data
+    decisions: VizDecision[];               // All decisions for markers
+    activeDecision: VizDecision | null;     // Currently selected decision
+    trade: VizTrade | null;                 // Active trade for position box
 }
 
 type Timeframe = '1m' | '5m' | '15m';
 
-// Aggregation helper: turns 1m candles into Xm candles
-// data: [open, high, low, close, volume]
-const aggregateData = (data: number[][], interval: number): number[][] => {
-    if (interval === 1) return data;
+// Aggregation helper for higher timeframes
+const aggregateData = (bars: BarData[], interval: number): BarData[] => {
+    if (interval === 1) return bars;
 
-    const aggregated: number[][] = [];
+    const aggregated: BarData[] = [];
 
-    // Iterate backwards to anchor on the most recent data point (decision time)
-    // This ensures the last bar on the chart aligns with the decision regardless of total count
-    for (let i = data.length - 1; i >= 0; i -= interval) {
-        const chunk: number[][] = [];
-        // Collect up to 'interval' candles for this period
-        for (let j = 0; j < interval; j++) {
-            const idx = i - j;
-            if (idx >= 0) {
-                // We unshift to keep them chronological [oldest ... newest] within the chunk
-                chunk.unshift(data[idx]);
-            }
-        }
-
+    for (let i = 0; i < bars.length; i += interval) {
+        const chunk = bars.slice(i, i + interval);
         if (chunk.length === 0) continue;
 
-        const open = chunk[0][0]; // Open of the first candle in chunk
-        const close = chunk[chunk.length - 1][3]; // Close of the last candle in chunk
+        const open = chunk[0].open;
+        const close = chunk[chunk.length - 1].close;
         let high = -Infinity;
         let low = Infinity;
         let vol = 0;
 
         chunk.forEach(c => {
-            if (c[1] > high) high = c[1];
-            if (c[2] < low) low = c[2];
-            vol += c[4];
+            if (c.high > high) high = c.high;
+            if (c.low < low) low = c.low;
+            vol += c.volume;
         });
 
-        // Unshift to result to maintain [oldest ... newest] order for the final array
-        aggregated.unshift([open, high, low, close, vol]);
+        aggregated.push({
+            time: chunk[0].time,
+            open,
+            high,
+            low,
+            close,
+            volume: vol
+        });
     }
     return aggregated;
 };
 
-export const CandleChart: React.FC<CandleChartProps> = ({ decision, trade }) => {
+// Parse ISO time string to Unix timestamp
+const parseTime = (timeStr: string): number => {
+    return Math.floor(new Date(timeStr).getTime() / 1000);
+};
+
+// Find bar index by timestamp
+const findBarIndex = (bars: BarData[], timestamp: string): number => {
+    const targetTime = parseTime(timestamp);
+    for (let i = 0; i < bars.length; i++) {
+        const barTime = parseTime(bars[i].time);
+        if (barTime >= targetTime) return i;
+    }
+    return bars.length - 1;
+};
+
+export const CandleChart: React.FC<CandleChartProps> = ({
+    continuousData,
+    decisions,
+    activeDecision,
+    trade
+}) => {
     const chartContainerRef = useRef<HTMLDivElement>(null);
     const chartRef = useRef<IChartApi | null>(null);
     const seriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
 
-    // References for OCO lines
-    const entryLineRef = useRef<any>(null);
-    const stopLineRef = useRef<any>(null);
-    const tpLineRef = useRef<any>(null);
+    // References for position box primitives
+    const positionBoxesRef = useRef<PositionBox[]>([]);
 
     const [timeframe, setTimeframe] = useState<Timeframe>('1m');
+    const [isLoading, setIsLoading] = useState(true);
 
+    // Process continuous data with current timeframe
+    const chartData = useMemo(() => {
+        if (!continuousData?.bars?.length) return [];
+
+        const intervalMap = { '1m': 1, '5m': 5, '15m': 15 };
+        const interval = intervalMap[timeframe];
+        const aggregated = aggregateData(continuousData.bars, interval);
+
+        return aggregated.map(bar => ({
+            time: parseTime(bar.time) as Time,
+            open: bar.open,
+            high: bar.high,
+            low: bar.low,
+            close: bar.close
+        }));
+    }, [continuousData, timeframe]);
+
+    // Get aggregated bars for timestamp lookups
+    const aggregatedBars = useMemo(() => {
+        if (!continuousData?.bars?.length) return [];
+        const intervalMap = { '1m': 1, '5m': 5, '15m': 15 };
+        return aggregateData(continuousData.bars, intervalMap[timeframe]);
+    }, [continuousData, timeframe]);
+
+    // Create decision markers
+    const decisionMarkers = useMemo((): SeriesMarker<Time>[] => {
+        if (!decisions.length || !aggregatedBars.length) return [];
+
+        return decisions
+            .filter(d => d.timestamp)
+            .map(d => {
+                const barIdx = findBarIndex(aggregatedBars, d.timestamp!);
+                const bar = aggregatedBars[barIdx];
+                if (!bar) return null;
+
+                const isActive = d.decision_id === activeDecision?.decision_id;
+                const direction = d.scanner_context?.direction || d.oco?.direction || 'LONG';
+
+                return {
+                    time: parseTime(bar.time) as Time,
+                    position: direction === 'LONG' ? 'belowBar' : 'aboveBar',
+                    color: isActive ? '#f59e0b' : '#6366f1', // amber for active, indigo for others
+                    shape: direction === 'LONG' ? 'arrowUp' : 'arrowDown',
+                    text: isActive ? 'ACTIVE' : '',
+                    size: isActive ? 2 : 1
+                } as SeriesMarker<Time>;
+            })
+            .filter((m): m is SeriesMarker<Time> => m !== null);
+    }, [decisions, activeDecision, aggregatedBars]);
+
+    // Initialize chart
     useEffect(() => {
         if (!chartContainerRef.current) return;
 
@@ -102,111 +169,124 @@ export const CandleChart: React.FC<CandleChartProps> = ({ decision, trade }) => 
 
         return () => {
             window.removeEventListener('resize', handleResize);
+            // Detach all position boxes
+            positionBoxesRef.current.forEach(box => {
+                try { seriesRef.current?.detachPrimitive(box); } catch { }
+            });
+            positionBoxesRef.current = [];
             chart.remove();
         };
     }, []);
 
-    // Update Data when decision or timeframe changes
+    // Update chart data when continuous data or timeframe changes
     useEffect(() => {
-        if (!seriesRef.current || !decision) return;
+        if (!seriesRef.current || !chartData.length) return;
 
-        // Use RAW OHLCV data (not normalized CNN input) for chart display
-        // Fall back to x_price_1m for backward compatibility with old data
-        const rawData = decision.window?.raw_ohlcv_1m || decision.window?.x_price_1m || (decision as any).x_price_1m;
-
-        if (!rawData || rawData.length === 0) return;
-
-        // Determine aggregation interval
-        const intervalMap = { '1m': 1, '5m': 5, '15m': 15 };
-        const interval = intervalMap[timeframe];
-
-        // Process data (already includes history + future in raw_ohlcv_1m)
-        const processedData = aggregateData(rawData, interval);
-
-        // Calculate Timestamps
-        // raw_ohlcv_1m has 60 bars before decision + 20 after
-        // Decision is at index 60 (0-indexed), so bar 60 is decision time
-        const decisionBarIndex = Math.min(60, rawData.length - 1);
-        const baseTime = new Date(decision.timestamp || Date.now()).getTime() / 1000;
-
-        // Map all bars with correct timestamps
-        const chartData = processedData.map((d, i) => {
-            // Calculate offset from decision bar after aggregation
-            const aggregatedDecisionIdx = Math.floor(decisionBarIndex / interval);
-            const offset = aggregatedDecisionIdx - i;
-            return {
-                time: (baseTime - (offset * interval * 60)) as Time,
-                open: d[0],
-                high: d[1],
-                low: d[2],
-                close: d[3],
-            };
-        });
-
+        setIsLoading(true);
         seriesRef.current.setData(chartData);
+        setIsLoading(false);
+    }, [chartData]);
 
-        // Remove old lines
-        if (entryLineRef.current) { seriesRef.current.removePriceLine(entryLineRef.current); entryLineRef.current = null; }
-        if (stopLineRef.current) { seriesRef.current.removePriceLine(stopLineRef.current); stopLineRef.current = null; }
-        if (tpLineRef.current) { seriesRef.current.removePriceLine(tpLineRef.current); tpLineRef.current = null; }
+    // Update markers when decisions change
+    useEffect(() => {
+        if (!seriesRef.current) return;
+        seriesRef.current.setMarkers(decisionMarkers);
+    }, [decisionMarkers]);
 
-        // Add OCO Lines if present
-        if (decision.oco) {
-            entryLineRef.current = seriesRef.current.createPriceLine({
-                price: decision.oco.entry_price,
-                color: '#3b82f6', // blue
-                lineWidth: 2,
-                lineStyle: 0, // Solid
-                axisLabelVisible: true,
-                title: 'ENTRY',
-            });
+    // Handle active decision - scroll to it and show position boxes
+    useEffect(() => {
+        if (!seriesRef.current || !chartRef.current) return;
+        if (!aggregatedBars.length) return;
 
-            stopLineRef.current = seriesRef.current.createPriceLine({
-                price: decision.oco.stop_price,
-                color: '#ef4444', // red
-                lineWidth: 2,
-                lineStyle: 2, // Dashed
-                axisLabelVisible: true,
-                title: 'STOP',
-            });
+        // Remove old position boxes
+        positionBoxesRef.current.forEach(box => {
+            try { seriesRef.current?.detachPrimitive(box); } catch { }
+        });
+        positionBoxesRef.current = [];
 
-            tpLineRef.current = seriesRef.current.createPriceLine({
-                price: decision.oco.tp_price,
-                color: '#22c55e', // green
-                lineWidth: 2,
-                lineStyle: 2, // Dashed
-                axisLabelVisible: true,
-                title: 'TP',
+        // If no active decision, just clear boxes
+        if (!activeDecision?.timestamp) return;
+
+        // Get decision bar
+        const decisionIdx = findBarIndex(aggregatedBars, activeDecision.timestamp);
+        const decisionBar = aggregatedBars[decisionIdx];
+        if (!decisionBar) return;
+
+        // Scroll to decision with context
+        const fromIdx = Math.max(0, decisionIdx - 30);
+        const toIdx = Math.min(aggregatedBars.length - 1, decisionIdx + 20);
+
+        if (aggregatedBars[fromIdx] && aggregatedBars[toIdx]) {
+            chartRef.current.timeScale().setVisibleRange({
+                from: parseTime(aggregatedBars[fromIdx].time) as Time,
+                to: parseTime(aggregatedBars[toIdx].time) as Time
             });
         }
 
-        // Add Decision Time Marker
-        // The decision bar is at decisionBarIndex in original data
-        // After aggregation, figure out which chartData index that corresponds to
-        const aggregatedDecisionIdx = Math.floor(60 / intervalMap[timeframe]);
-        const markerBar = chartData[aggregatedDecisionIdx];
+        // Add position boxes if OCO data available
+        const oco = activeDecision.oco;
+        if (oco) {
+            const entryPrice = oco.entry_price;
+            const stopPrice = oco.stop_price;
+            const tpPrice = oco.tp_price;
+            const direction = (activeDecision.scanner_context?.direction || oco.direction || 'LONG') as 'LONG' | 'SHORT';
 
-        if (markerBar) {
-            seriesRef.current.setMarkers([
-                {
-                    time: markerBar.time,
-                    position: 'aboveBar',
-                    color: '#f59e0b', // amber
-                    shape: 'arrowDown',
-                    text: 'Signal',
-                }
-            ]);
+            // Calculate end time: either trade exit or decision + max_bars
+            const startTime = parseTime(decisionBar.time) as Time;
+
+            // Use trade exit if available, otherwise estimate based on max_bars or 50 bars default
+            let endIdx = decisionIdx + (oco.max_bars || 50);
+            if (trade?.exit_bar) {
+                // Find the exit bar in aggregated data
+                const intervalMap = { '1m': 1, '5m': 5, '15m': 15 };
+                const interval = intervalMap[timeframe];
+                endIdx = Math.floor(trade.exit_bar / interval);
+            }
+            endIdx = Math.min(endIdx, aggregatedBars.length - 1);
+
+            const endBar = aggregatedBars[endIdx];
+            const endTime = endBar ? parseTime(endBar.time) as Time : startTime;
+
+            // Create position boxes
+            const { slBox, tpBox, entryBox } = createTradePositionBoxes(
+                entryPrice,
+                stopPrice,
+                tpPrice,
+                startTime,
+                endTime,
+                direction
+            );
+
+            // Attach primitives to series
+            seriesRef.current.attachPrimitive(slBox);
+            seriesRef.current.attachPrimitive(tpBox);
+            seriesRef.current.attachPrimitive(entryBox);
+
+            positionBoxesRef.current = [slBox, tpBox, entryBox];
         }
 
-        if (chartRef.current) {
-            chartRef.current.timeScale().fitContent();
-        }
-
-    }, [decision, timeframe]);
+    }, [activeDecision, trade, aggregatedBars, timeframe]);
 
     return (
         <div className="relative w-full h-full group">
             <div ref={chartContainerRef} className="w-full h-full" />
+
+            {/* Loading indicator */}
+            {isLoading && (
+                <div className="absolute inset-0 flex items-center justify-center bg-slate-900/50">
+                    <div className="text-slate-400">Loading chart...</div>
+                </div>
+            )}
+
+            {/* No data message */}
+            {!continuousData?.bars?.length && !isLoading && (
+                <div className="absolute inset-0 flex items-center justify-center">
+                    <div className="text-center text-slate-500">
+                        <p className="text-lg mb-2">No continuous data loaded</p>
+                        <p className="text-sm">Waiting for market data...</p>
+                    </div>
+                </div>
+            )}
 
             {/* Timeframe Controls */}
             <div className="absolute top-3 right-3 flex bg-slate-800 rounded-md border border-slate-700 shadow-lg overflow-hidden z-10">
@@ -223,6 +303,13 @@ export const CandleChart: React.FC<CandleChartProps> = ({ decision, trade }) => 
                     </button>
                 ))}
             </div>
+
+            {/* Decision count overlay */}
+            {decisions.length > 0 && (
+                <div className="absolute bottom-3 right-3 bg-slate-800/80 px-2 py-1 rounded text-xs text-slate-400 z-10">
+                    {decisions.length} decisions
+                </div>
+            )}
         </div>
     );
 };
