@@ -8,6 +8,7 @@ interface CandleChartProps {
     decisions: VizDecision[];               // All decisions for markers
     activeDecision: VizDecision | null;     // Currently selected decision
     trade: VizTrade | null;                 // Active trade for position box
+    trades?: VizTrade[];                    // All trades for overlay mode
 }
 
 type Timeframe = '1m' | '5m' | '15m';
@@ -65,17 +66,20 @@ export const CandleChart: React.FC<CandleChartProps> = ({
     continuousData,
     decisions,
     activeDecision,
-    trade
+    trade,
+    trades = []
 }) => {
     const chartContainerRef = useRef<HTMLDivElement>(null);
     const chartRef = useRef<IChartApi | null>(null);
     const seriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
 
     // References for position box primitives
-    const positionBoxesRef = useRef<PositionBox[]>([]);
+    const activeBoxesRef = useRef<PositionBox[]>([]);
+    const allTradesBoxesRef = useRef<Map<string, PositionBox[]>>(new Map());
 
     const [timeframe, setTimeframe] = useState<Timeframe>('1m');
     const [isLoading, setIsLoading] = useState(true);
+    const [showAllTrades, setShowAllTrades] = useState(false);
 
     // Process continuous data with current timeframe
     const chartData = useMemo(() => {
@@ -170,10 +174,16 @@ export const CandleChart: React.FC<CandleChartProps> = ({
         return () => {
             window.removeEventListener('resize', handleResize);
             // Detach all position boxes
-            positionBoxesRef.current.forEach(box => {
+            activeBoxesRef.current.forEach(box => {
                 try { seriesRef.current?.detachPrimitive(box); } catch { }
             });
-            positionBoxesRef.current = [];
+            activeBoxesRef.current = [];
+            allTradesBoxesRef.current.forEach(boxes => {
+                boxes.forEach(box => {
+                    try { seriesRef.current?.detachPrimitive(box); } catch { }
+                });
+            });
+            allTradesBoxesRef.current.clear();
             chart.remove();
         };
     }, []);
@@ -193,16 +203,72 @@ export const CandleChart: React.FC<CandleChartProps> = ({
         seriesRef.current.setMarkers(decisionMarkers);
     }, [decisionMarkers]);
 
+    // Render all trades as position boxes
+    useEffect(() => {
+        if (!seriesRef.current || !showAllTrades) return;
+        if (!aggregatedBars.length || !continuousData?.bars?.length) return;
+        if (!trades.length) return;
+
+        // Clear existing all-trades boxes
+        allTradesBoxesRef.current.forEach(boxes => {
+            boxes.forEach(box => {
+                try { seriesRef.current?.detachPrimitive(box); } catch { }
+            });
+        });
+        allTradesBoxesRef.current.clear();
+
+        // Create boxes for each trade
+        trades.forEach(t => {
+            const decision = decisions.find(d => d.decision_id === t.decision_id);
+            if (!decision?.oco || !decision.timestamp) return;
+
+            const oco = decision.oco;
+            const startTime = parseTime(decision.timestamp) as Time;
+            
+            // Calculate end time
+            let endTime = startTime;
+            if (t.exit_time) {
+                endTime = parseTime(t.exit_time) as Time;
+            } else if (t.bars_held) {
+                const startTimeMs = parseTime(decision.timestamp) * 1000;
+                const endTimeMs = startTimeMs + (t.bars_held * 60 * 1000);
+                endTime = Math.floor(endTimeMs / 1000) as Time;
+            }
+
+            const direction = (decision.scanner_context?.direction || oco.direction || 'LONG') as 'LONG' | 'SHORT';
+            
+            const { slBox, tpBox, entryBox } = createTradePositionBoxes(
+                oco.entry_price,
+                oco.stop_price,
+                oco.tp_price,
+                startTime,
+                endTime,
+                direction,
+                t.trade_id || t.decision_id
+            );
+
+            // Attach boxes
+            seriesRef.current?.attachPrimitive(slBox);
+            seriesRef.current?.attachPrimitive(tpBox);
+            seriesRef.current?.attachPrimitive(entryBox);
+
+            allTradesBoxesRef.current.set(t.trade_id || t.decision_id, [slBox, tpBox, entryBox]);
+        });
+
+    }, [showAllTrades, trades, decisions, aggregatedBars, continuousData, timeframe]);
+
     // Handle active decision - scroll to it and show position boxes
     useEffect(() => {
         if (!seriesRef.current || !chartRef.current) return;
         if (!aggregatedBars.length || !continuousData?.bars?.length) return;
 
-        // Remove old position boxes
-        positionBoxesRef.current.forEach(box => {
-            try { seriesRef.current?.detachPrimitive(box); } catch { }
-        });
-        positionBoxesRef.current = [];
+        // Remove old active position boxes (unless showing all trades)
+        if (!showAllTrades) {
+            activeBoxesRef.current.forEach(box => {
+                try { seriesRef.current?.detachPrimitive(box); } catch { }
+            });
+            activeBoxesRef.current = [];
+        }
 
         // If no active decision, just clear boxes
         if (!activeDecision?.timestamp) return;
@@ -257,25 +323,29 @@ export const CandleChart: React.FC<CandleChartProps> = ({
                 endTime = Math.floor(endTimeMs / 1000) as Time;
             }
 
-            // Create position boxes with actual timestamps
-            const { slBox, tpBox, entryBox } = createTradePositionBoxes(
-                entryPrice,
-                stopPrice,
-                tpPrice,
-                startTime,
-                endTime,
-                direction
-            );
+            // Only show active trade boxes if not showing all trades
+            if (!showAllTrades) {
+                // Create position boxes with actual timestamps
+                const { slBox, tpBox, entryBox } = createTradePositionBoxes(
+                    entryPrice,
+                    stopPrice,
+                    tpPrice,
+                    startTime,
+                    endTime,
+                    direction,
+                    activeDecision.decision_id
+                );
 
-            // Attach primitives to series
-            seriesRef.current.attachPrimitive(slBox);
-            seriesRef.current.attachPrimitive(tpBox);
-            seriesRef.current.attachPrimitive(entryBox);
+                // Attach primitives to series
+                seriesRef.current.attachPrimitive(slBox);
+                seriesRef.current.attachPrimitive(tpBox);
+                seriesRef.current.attachPrimitive(entryBox);
 
-            positionBoxesRef.current = [slBox, tpBox, entryBox];
+                activeBoxesRef.current = [slBox, tpBox, entryBox];
+            }
         }
 
-    }, [activeDecision, trade, aggregatedBars, timeframe, continuousData]);
+    }, [activeDecision, trade, aggregatedBars, timeframe, continuousData, showAllTrades]);
 
     return (
         <div className="relative w-full h-full group">
@@ -298,20 +368,36 @@ export const CandleChart: React.FC<CandleChartProps> = ({
                 </div>
             )}
 
-            {/* Timeframe Controls */}
-            <div className="absolute top-3 right-3 flex bg-slate-800 rounded-md border border-slate-700 shadow-lg overflow-hidden z-10">
-                {(['1m', '5m', '15m'] as Timeframe[]).map((tf) => (
+            {/* Controls */}
+            <div className="absolute top-3 right-3 flex flex-col gap-2 z-10">
+                {/* Timeframe Controls */}
+                <div className="flex bg-slate-800 rounded-md border border-slate-700 shadow-lg overflow-hidden">
+                    {(['1m', '5m', '15m'] as Timeframe[]).map((tf) => (
+                        <button
+                            key={tf}
+                            onClick={() => setTimeframe(tf)}
+                            className={`px-3 py-1 text-xs font-bold transition-colors ${timeframe === tf
+                                ? 'bg-blue-600 text-white'
+                                : 'bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-slate-200'
+                                } ${tf !== '15m' ? 'border-r border-slate-700' : ''}`}
+                        >
+                            {tf}
+                        </button>
+                    ))}
+                </div>
+
+                {/* Show All Trades Toggle */}
+                {trades.length > 0 && (
                     <button
-                        key={tf}
-                        onClick={() => setTimeframe(tf)}
-                        className={`px-3 py-1 text-xs font-bold transition-colors ${timeframe === tf
-                            ? 'bg-blue-600 text-white'
-                            : 'bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-slate-200'
-                            } ${tf !== '15m' ? 'border-r border-slate-700' : ''}`}
+                        onClick={() => setShowAllTrades(!showAllTrades)}
+                        className={`px-3 py-1.5 text-xs font-semibold rounded-md border transition-colors ${showAllTrades
+                            ? 'bg-indigo-600 text-white border-indigo-500'
+                            : 'bg-slate-800 text-slate-400 border-slate-700 hover:bg-slate-700 hover:text-slate-200'
+                            }`}
                     >
-                        {tf}
+                        {showAllTrades ? `All Trades (${trades.length})` : 'Show All Trades'}
                     </button>
-                ))}
+                )}
             </div>
 
             {/* Decision count overlay */}
