@@ -5,6 +5,7 @@ Wraps Triggers to provide a standard Scanner interface.
 """
 
 from typing import Dict, Any, Optional
+import inspect
 
 from src.policy.scanners import Scanner, ScannerResult
 from src.policy.triggers import Trigger, trigger_from_dict
@@ -34,8 +35,15 @@ class ModularScanner(Scanner):
         if current_idx - self._last_trigger_idx < self._cooldown_bars:
             return ScannerResult(scanner_id=self.scanner_id, triggered=False)
         
-        # Check trigger (pass any extra kwargs like df_15m)
-        res = self._trigger.check(features, **kwargs)
+        # Check if trigger.check accepts kwargs
+        sig = inspect.signature(self._trigger.check)
+        accepts_kwargs = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values())
+        
+        # Check trigger (pass kwargs only if trigger supports them)
+        if accepts_kwargs:
+            res = self._trigger.check(features, **kwargs)
+        else:
+            res = self._trigger.check(features)
         
         if res.triggered:
             self._last_trigger_idx = current_idx
