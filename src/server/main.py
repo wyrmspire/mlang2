@@ -22,6 +22,11 @@ from src.data.resample import resample_all_timeframes
 
 app = FastAPI(title="MLang2 API", version="1.0.0")
 
+# Mount replay router
+from src.server.replay_routes import router as replay_router
+app.include_router(replay_router)
+
+
 # CORS for frontend
 app.add_middleware(
     CORSMiddleware,
@@ -290,11 +295,17 @@ async def get_continuous_contract(
         except Exception:
             pass  # Fall back to 1m
     
-    # Apply limit
-    default_limits = {'1m': 10000, '5m': 5000, '15m': 2000, '1h': 1000}
-    max_bars = limit or default_limits.get(timeframe, 10000)
-    if len(df) > max_bars:
-        df = df.tail(max_bars)
+    # Apply limit only when no explicit date range was provided
+    # When dates are specified, we want the full range to avoid cutting off decision markers
+    if not (start or end):
+        default_limits = {'1m': 10000, '5m': 5000, '15m': 2000, '1h': 1000}
+        max_bars = limit or default_limits.get(timeframe, 10000)
+        if len(df) > max_bars:
+            df = df.tail(max_bars)
+    elif limit:
+        # Explicit limit always honored
+        if len(df) > limit:
+            df = df.tail(limit)
     
     # Fast conversion using to_dict
     df_out = df.copy()
@@ -328,6 +339,10 @@ def build_agent_prompt(context: ChatContext, decisions: List[Dict], trades: List
     
     current_json = json.dumps(current, indent=2) if current else "None selected"
     
+    # Discovery info for modular system
+    trigger_types = ["time", "candle_pattern", "ema_cross", "rsi_threshold"]
+    bracket_types = ["atr", "percent", "fixed"]
+
     return f"""You are a trade analysis assistant for the MLang2 trading research platform.
 You can BOTH analyze existing data AND run new strategies to create data.
 
@@ -343,11 +358,27 @@ AVAILABLE ACTIONS:
 1. Navigate: ACTION: {{"type": "SET_INDEX", "payload": <number>}}
 2. Switch mode: ACTION: {{"type": "SET_MODE", "payload": "DECISION" or "TRADE"}}
 3. Load run: ACTION: {{"type": "LOAD_RUN", "payload": "<run_id>"}}
-4. RUN STRATEGY: ACTION: {{"type": "RUN_STRATEGY", "payload": {{"strategy": "opening_range", "start_date": "2025-03-17", "weeks": 3}}}}
+4. RUN STRATEGY: ACTION: {{"type": "RUN_STRATEGY", "payload": {{"strategy": "modular", "config": <config_dict>}}}}
+5. START REPLAY: ACTION: {{"type": "START_REPLAY", "payload": {{"start_date": "YYYY-MM-DD", "days": 1, "speed": 10, "threshold": 0.6}}}}
 
-AVAILABLE STRATEGIES: "opening_range" (or "or")
+MODULAR STRATEGY FORMAT:
+{{
+  "trigger": {{"type": "...", ...}},
+  "bracket": {{"type": "...", ...}}
+}}
 
-When user asks to run/create/generate data, use RUN_STRATEGY.
+TRIGGERS: {trigger_types}
+BRACKETS: {bracket_types}
+
+EXAMPLES:
+- RSI Oversold: {{"trigger": {{"type": "rsi_threshold", "oversold": 30}}, "bracket": {{"type": "atr", "stop_atr": 2, "tp_atr": 3}}}}
+- Hammer Candle: {{"trigger": {{"type": "candle_pattern", "patterns": ["hammer"]}}, "bracket": {{"type": "percent", "stop_pct": 0.5, "tp_pct": 1.0}}}}
+
+AVAILABLE STRATEGIES: "opening_range", "modular"
+TRAINED MODEL: models/best_model.pth (FusionModel CNN)
+
+When user asks to run/create/generate data, use RUN_STRATEGY with "modular" and a config.
+When user asks to replay/visualize/watch model triggers, use START_REPLAY.
 Include action at END in format: ACTION: {{"type": "...", "payload": ...}}
 Be concise."""
 
@@ -462,7 +493,8 @@ async def run_strategy(request: RunStrategyRequest) -> Dict[str, Any]:
     scripts = {
         "opening_range": "scripts/run_or_multi_oco.py",
         "or": "scripts/run_or_multi_oco.py",
-        "always": "scripts/run_or_multi_oco.py",  # Can handle different scanners
+        "always": "scripts/run_or_multi_oco.py",
+        "modular": "scripts/run_modular_strategy.py",
     }
     
     script = scripts.get(strategy_id)
@@ -472,7 +504,17 @@ async def run_strategy(request: RunStrategyRequest) -> Dict[str, Any]:
     # Build command
     out_dir = RESULTS_DIR / run_name
     
-    if request.config:
+    if strategy_id == "modular":
+        # Handle modular strategy
+        config_json = json.dumps(request.config)
+        cmd = [
+            "python", script,
+            "--config", config_json,
+            "--start-date", request.start_date or "2025-03-17",
+            "--weeks", str(request.weeks or 1),
+            "--out", str(out_dir)
+        ]
+    elif request.config:
         # New approach: use StrategyConfig
         from src.experiments.strategy_config import StrategyConfig
         

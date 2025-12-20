@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { api } from './api/client';
 import { VizDecision, VizTrade, UIAction, ContinuousData } from './types/viz';
 import { RunPicker } from './components/RunPicker';
@@ -6,12 +6,15 @@ import { Navigator } from './components/Navigator';
 import { CandleChart } from './components/CandleChart';
 import { DetailsPanel } from './components/DetailsPanel';
 import { ChatAgent } from './components/ChatAgent';
-
+import { ReplayControls } from './components/ReplayControls';
+import { SimulationView } from './components/SimulationView';
 const App: React.FC = () => {
   const [currentRun, setCurrentRun] = useState<string>('');
   const [mode, setMode] = useState<'DECISION' | 'TRADE'>('DECISION');
   const [index, setIndex] = useState<number>(0);
   const [showRawData, setShowRawData] = useState<boolean>(false);
+  const [isReplaying, setIsReplaying] = useState<boolean>(false);
+  const [showSimulation, setShowSimulation] = useState<boolean>(false);
 
   // Continuous contract data (loaded once)
   const [continuousData, setContinuousData] = useState<ContinuousData | null>(null);
@@ -23,23 +26,23 @@ const App: React.FC = () => {
   // Load continuous contract data - reload when decisions change to match date range
   useEffect(() => {
     setContinuousLoading(true);
-    
+
     // Calculate date range from decisions if available
     let startDate: string | undefined;
     let endDate: string | undefined;
-    
+
     if (decisions.length > 0) {
       const timestamps = decisions
         .map(d => d.timestamp)
         .filter((t): t is string => !!t)
         .sort();
-      
+
       if (timestamps.length > 0) {
         startDate = timestamps[0];
         endDate = timestamps[timestamps.length - 1];
       }
     }
-    
+
     api.getContinuousContract(startDate, endDate).then(data => {
       setContinuousData(data);
       setContinuousLoading(false);
@@ -96,21 +99,22 @@ const App: React.FC = () => {
         setCurrentRun(action.payload);
         break;
       case 'RUN_STRATEGY':
-        // Call backend to run strategy
         try {
-          const response = await fetch('http://localhost:8000/agent/run-strategy', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(action.payload)
-          });
-          const result = await response.json();
+          const result = await api.runStrategy(action.payload);
           if (result.success && result.run_id) {
-            // Auto-load the new run
             setCurrentRun(result.run_id);
           }
         } catch (e) {
           console.error('Failed to run strategy:', e);
         }
+        break;
+      case 'START_REPLAY':
+        // Trigger replay via the ReplayControls component
+        // For now, log and set replaying state
+        console.log('Agent requested replay:', action.payload);
+        setIsReplaying(true);
+        // The ReplayControls component will handle the actual replay
+        // Could dispatch to it via state or context in future
         break;
       default:
         console.warn('Unknown action:', action);
@@ -125,8 +129,14 @@ const App: React.FC = () => {
 
       {/* LEFT SIDEBAR */}
       <div className="w-80 flex flex-col border-r border-slate-700 bg-slate-800">
-        <div className="h-16 flex items-center px-4 border-b border-slate-700">
+        <div className="h-16 flex items-center justify-between px-4 border-b border-slate-700">
           <h1 className="font-bold text-white text-lg">Trade Viz Agent</h1>
+          <button
+            onClick={() => setShowSimulation(true)}
+            className="bg-purple-600 hover:bg-purple-500 text-white text-xs px-3 py-1 rounded"
+          >
+            ▶ Simulate
+          </button>
         </div>
 
         <RunPicker onSelect={setCurrentRun} />
@@ -138,6 +148,17 @@ const App: React.FC = () => {
           setIndex={setIndex}
           maxIndex={Math.max(0, maxIndex)}
         />
+
+        {/* REPLAY CONTROLS */}
+        <div className="p-2">
+          <ReplayControls
+            maxIndex={maxIndex}
+            currentIndex={index}
+            onIndexChange={setIndex}
+            onReplayStart={() => setIsReplaying(true)}
+            onReplayEnd={() => setIsReplaying(false)}
+          />
+        </div>
 
         <div className="flex-1 overflow-auto p-2">
           {continuousLoading ? (
@@ -223,6 +244,20 @@ const App: React.FC = () => {
         </div>
 
       </div>
+
+      {/* SIMULATION OVERLAY */}
+      {showSimulation && (
+        <SimulationView
+          onClose={() => setShowSimulation(false)}
+          runId={currentRun}
+          lastTradeTimestamp={
+            // Use last decision timestamp (decisions always exist, trades may be empty)
+            decisions.length > 0
+              ? decisions[decisions.length - 1].timestamp || undefined
+              : undefined
+          }
+        />
+      )}
 
     </div>
   );

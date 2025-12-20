@@ -3,12 +3,21 @@ import { createChart, ColorType, IChartApi, ISeriesApi, Time, SeriesMarker } fro
 import { VizDecision, VizTrade, ContinuousData, BarData } from '../types/viz';
 import { PositionBox, createTradePositionBoxes } from './PositionBox';
 
+interface SimulationOco {
+    entry: number;
+    stop: number;
+    tp: number;
+    startTime: number;  // Unix timestamp
+}
+
 interface CandleChartProps {
     continuousData: ContinuousData | null;  // Full contract data
     decisions: VizDecision[];               // All decisions for markers
     activeDecision: VizDecision | null;     // Currently selected decision
     trade: VizTrade | null;                 // Active trade for position box
     trades?: VizTrade[];                    // All trades for overlay mode
+    simulationOco?: SimulationOco | null;   // OCO state for simulation mode
+    forceShowAllTrades?: boolean;           // Force showing all trades
 }
 
 type Timeframe = '1m' | '5m' | '15m';
@@ -67,7 +76,9 @@ export const CandleChart: React.FC<CandleChartProps> = ({
     decisions,
     activeDecision,
     trade,
-    trades = []
+    trades = [],
+    simulationOco,
+    forceShowAllTrades = false
 }) => {
     const chartContainerRef = useRef<HTMLDivElement>(null);
     const chartRef = useRef<IChartApi | null>(null);
@@ -76,6 +87,8 @@ export const CandleChart: React.FC<CandleChartProps> = ({
     // References for position box primitives
     const activeBoxesRef = useRef<PositionBox[]>([]);
     const allTradesBoxesRef = useRef<Map<string, PositionBox[]>>(new Map());
+    const simOcoBoxesRef = useRef<PositionBox[]>([]);
+    const simPriceLinesRef = useRef<any[]>([]); // Store price line objects
 
     const [timeframe, setTimeframe] = useState<Timeframe>('1m');
     const [isLoading, setIsLoading] = useState(true);
@@ -194,6 +207,16 @@ export const CandleChart: React.FC<CandleChartProps> = ({
 
         setIsLoading(true);
         seriesRef.current.setData(chartData);
+
+        // Force resize to pick up container dimensions (fixes simulation view)
+        if (chartRef.current && chartContainerRef.current) {
+            const width = chartContainerRef.current.clientWidth;
+            const height = chartContainerRef.current.clientHeight;
+            if (width > 0 && height > 0) {
+                chartRef.current.applyOptions({ width, height });
+            }
+        }
+
         setIsLoading(false);
     }, [chartData]);
 
@@ -205,11 +228,12 @@ export const CandleChart: React.FC<CandleChartProps> = ({
 
     // Render all trades as position boxes
     useEffect(() => {
-        if (!seriesRef.current || !showAllTrades) return;
-        if (!aggregatedBars.length || !continuousData?.bars?.length) return;
-        if (!trades.length) return;
+        const shouldShowAll = showAllTrades || forceShowAllTrades;
+        const interval = timeframe === '5m' ? 5 : timeframe === '15m' ? 15 : 1;
 
-        // Clear existing all-trades boxes
+        if (!seriesRef.current) return;
+
+        // Always clear first to handle updates or toggling off
         allTradesBoxesRef.current.forEach(boxes => {
             boxes.forEach(box => {
                 try { seriesRef.current?.detachPrimitive(box); } catch { }
@@ -217,27 +241,45 @@ export const CandleChart: React.FC<CandleChartProps> = ({
         });
         allTradesBoxesRef.current.clear();
 
+        if (!shouldShowAll) return;
+        if (!aggregatedBars.length || !continuousData?.bars?.length) return;
+        if (!trades.length) return;
+
         // Create boxes for each trade
         trades.forEach(t => {
             const decision = decisions.find(d => d.decision_id === t.decision_id);
             if (!decision?.oco || !decision.timestamp) return;
 
             const oco = decision.oco;
-            const startTime = parseTime(decision.timestamp) as Time;
-            
+            // Snap start time to current timeframe interval
+            const rawStartIdx = findBarIndex(continuousData.bars, decision.timestamp);
+            const snappedStartIdx = Math.floor(rawStartIdx / interval);
+            const snappedStartBar = aggregatedBars[Math.min(snappedStartIdx, aggregatedBars.length - 1)];
+            if (!snappedStartBar) return;
+            const startTime = parseTime(snappedStartBar.time) as Time;
+
             // Calculate end time
             let endTime = startTime;
             if (t.exit_time) {
-                endTime = parseTime(t.exit_time) as Time;
+                const rawExitIdx = findBarIndex(continuousData.bars, t.exit_time);
+                const snappedExitIdx = Math.floor(rawExitIdx / interval);
+                const snappedExitBar = aggregatedBars[Math.min(snappedExitIdx, aggregatedBars.length - 1)];
+                if (snappedExitBar) {
+                    endTime = parseTime(snappedExitBar.time) as Time;
+                }
             } else if (t.bars_held) {
-                const startTimeMs = parseTime(decision.timestamp) * 1000;
-                const endTimeMs = startTimeMs + (t.bars_held * 60 * 1000);
-                endTime = Math.floor(endTimeMs / 1000) as Time;
+                // Estimate based on bars held (adjusted for interval)
+                const barsHeldAdjusted = Math.ceil(t.bars_held / interval);
+                const endIdx = Math.min(snappedStartIdx + barsHeldAdjusted, aggregatedBars.length - 1);
+                const endBar = aggregatedBars[endIdx];
+                if (endBar) {
+                    endTime = parseTime(endBar.time) as Time;
+                }
             }
 
             const direction = (decision.scanner_context?.direction || oco.direction || 'LONG') as 'LONG' | 'SHORT';
-            
-            const { slBox, tpBox, entryBox } = createTradePositionBoxes(
+
+            const { slBox, tpBox } = createTradePositionBoxes(
                 oco.entry_price,
                 oco.stop_price,
                 oco.tp_price,
@@ -250,12 +292,11 @@ export const CandleChart: React.FC<CandleChartProps> = ({
             // Attach boxes
             seriesRef.current?.attachPrimitive(slBox);
             seriesRef.current?.attachPrimitive(tpBox);
-            seriesRef.current?.attachPrimitive(entryBox);
 
-            allTradesBoxesRef.current.set(t.trade_id || t.decision_id, [slBox, tpBox, entryBox]);
+            allTradesBoxesRef.current.set(t.trade_id || t.decision_id, [slBox, tpBox]);
         });
 
-    }, [showAllTrades, trades, decisions, aggregatedBars, continuousData, timeframe]);
+    }, [showAllTrades, forceShowAllTrades, trades, decisions, aggregatedBars, continuousData, timeframe]);
 
     // Handle active decision - scroll to it and show position boxes
     useEffect(() => {
@@ -302,7 +343,7 @@ export const CandleChart: React.FC<CandleChartProps> = ({
 
             // Calculate end time based on trade data or estimate
             let endTime = startTime;
-            
+
             if (trade?.exit_time) {
                 // Use actual exit timestamp from trade
                 endTime = parseTime(trade.exit_time) as Time;
@@ -326,7 +367,7 @@ export const CandleChart: React.FC<CandleChartProps> = ({
             // Only show active trade boxes if not showing all trades
             if (!showAllTrades) {
                 // Create position boxes with actual timestamps
-                const { slBox, tpBox, entryBox } = createTradePositionBoxes(
+                const { slBox, tpBox } = createTradePositionBoxes(
                     entryPrice,
                     stopPrice,
                     tpPrice,
@@ -339,13 +380,60 @@ export const CandleChart: React.FC<CandleChartProps> = ({
                 // Attach primitives to series
                 seriesRef.current.attachPrimitive(slBox);
                 seriesRef.current.attachPrimitive(tpBox);
-                seriesRef.current.attachPrimitive(entryBox);
 
-                activeBoxesRef.current = [slBox, tpBox, entryBox];
+                activeBoxesRef.current = [slBox, tpBox];
             }
         }
 
     }, [activeDecision, trade, aggregatedBars, timeframe, continuousData, showAllTrades]);
+
+    // Render simulation OCO position boxes
+    // Render simulation OCO price lines
+    useEffect(() => {
+        if (!seriesRef.current) return;
+
+        // Clear existing simulation lines
+        simPriceLinesRef.current.forEach(line => {
+            try { seriesRef.current?.removePriceLine(line); } catch { }
+        });
+        simPriceLinesRef.current = [];
+
+        // If no simulation OCO, we're done
+        if (!simulationOco) return;
+
+        // Entry Line
+        const entryLine = seriesRef.current.createPriceLine({
+            price: simulationOco.entry,
+            color: '#3b82f6', // Blue
+            lineWidth: 2,
+            lineStyle: 0, // Solid
+            axisLabelVisible: true,
+            title: '',
+        });
+
+        // TP Line
+        const tpLine = seriesRef.current.createPriceLine({
+            price: simulationOco.tp,
+            color: '#22c55e', // Green
+            lineWidth: 2,
+            lineStyle: 0, // Solid
+            axisLabelVisible: true,
+            title: '',
+        });
+
+        // SL Line
+        const slLine = seriesRef.current.createPriceLine({
+            price: simulationOco.stop,
+            color: '#ef4444', // Red
+            lineWidth: 2,
+            lineStyle: 0, // Solid
+            axisLabelVisible: true,
+            title: '',
+        });
+
+        simPriceLinesRef.current = [entryLine, tpLine, slLine];
+
+    }, [simulationOco]);
 
     return (
         <div className="relative w-full h-full group">

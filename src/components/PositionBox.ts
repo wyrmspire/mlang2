@@ -172,7 +172,7 @@ export function createTradePositionBoxes(
     endTime: Time,
     direction: 'LONG' | 'SHORT',
     tradeId: string = 'default'
-): { slBox: PositionBox; tpBox: PositionBox; entryBox: PositionBox } {
+): { slBox: PositionBox; tpBox: PositionBox; } {
 
     // SL Zone (red)
     const slBox = new PositionBox({
@@ -184,8 +184,6 @@ export function createTradePositionBoxes(
         fillColor: 'rgba(239, 68, 68, 0.15)',  // red-500 @ 15%
         borderColor: '#ef4444',
         borderWidth: 1,
-        label: 'STOP',
-        labelColor: '#ef4444',
     });
 
     // TP Zone (green)
@@ -198,24 +196,7 @@ export function createTradePositionBoxes(
         fillColor: 'rgba(34, 197, 94, 0.15)',  // green-500 @ 15%
         borderColor: '#22c55e',
         borderWidth: 1,
-        label: 'TP',
-        labelColor: '#22c55e',
     });
 
-    // Entry line zone (thin blue box)
-    const entryThickness = Math.abs(tpPrice - stopPrice) * 0.02; // 2% of range for visibility
-    const entryBox = new PositionBox({
-        id: `entry_${tradeId}`,
-        startTime,
-        endTime,
-        topPrice: entryPrice + entryThickness,
-        bottomPrice: entryPrice - entryThickness,
-        fillColor: 'rgba(59, 130, 246, 0.3)',  // blue-500 @ 30%
-        borderColor: '#3b82f6',
-        borderWidth: 2,
-        label: 'ENTRY',
-        labelColor: '#3b82f6',
-    });
-
-    return { slBox, tpBox, entryBox };
+    return { slBox, tpBox };
 }
