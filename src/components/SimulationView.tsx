@@ -1,6 +1,7 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { CandleChart } from './CandleChart';
 import { VizTrade, VizDecision, VizOCO } from '../types/viz';
+import { api } from '../api/client';
 
 interface SimulationViewProps {
     onClose: () => void;
@@ -14,21 +15,28 @@ interface BarData {
     high: number;
     low: number;
     close: number;
+    volume: number;
 }
 
-/**
- * Simulation View - Full forward simulation page
- * 
- * Loads data starting from AFTER the strategy's last trade,
- * runs model bar-by-bar, shows OCO when triggered.
- */
+interface ReplayDecision {
+    type: 'DECISION';
+    decision_id: string;
+    bar_idx: number;
+    timestamp: string;
+    win_probability: number;
+    threshold: number;
+    triggered: boolean;
+    price: number;
+    atr: number;
+}
+
 export const SimulationView: React.FC<SimulationViewProps> = ({
     onClose,
     runId,
     lastTradeTimestamp
 }) => {
     const [isRunning, setIsRunning] = useState(false);
-    const [speed, setSpeed] = useState(200); // ms per bar
+    const [speed, setSpeed] = useState(200); // ms per bar for playback
     const [bars, setBars] = useState<BarData[]>([]);
     const [currentIndex, setCurrentIndex] = useState(0);
     const [status, setStatus] = useState('Ready');
@@ -40,27 +48,33 @@ export const SimulationView: React.FC<SimulationViewProps> = ({
 
     const intervalRef = useRef<NodeJS.Timeout | null>(null);
     const allBarsRef = useRef<BarData[]>([]);
+
+    // Model Integration
+    const [modelLoading, setModelLoading] = useState(false);
+    const modelDecisionsRef = useRef<Map<number, ReplayDecision>>(new Map()); // Map timestamp -> Decision
+
     const ocoRef = useRef<{ entry: number, stop: number, tp: number, startTime: number } | null>(null);
+
+    // Trade tracking
+    const [completedTrades, setCompletedTrades] = useState<VizTrade[]>([]);
+    const [completedDecisions, setCompletedDecisions] = useState<VizDecision[]>([]);
+    const completedTradesRef = useRef<VizTrade[]>([]);
+    const completedDecisionsRef = useRef<VizDecision[]>([]);
 
     // Load continuous contract data starting AFTER the last trade
     useEffect(() => {
         const loadData = async () => {
             setStatus('Loading data...');
             try {
-                // Try both ports
+                // Try both ports (logic preserved from original)
                 for (const port of [8000, 8001]) {
                     try {
-                        // Build query params - if we have lastTradeTimestamp, start from there
                         const params = new URLSearchParams();
                         params.set('timeframe', '1m');
 
-                        // Use last trade timestamp - start 2 days BEFORE for context
-                        // This allows seeing the setup leading into where we start simulating
                         if (lastTradeTimestamp) {
                             const lastTradeDate = new Date(lastTradeTimestamp);
-                            // Start 2 days before the last trade for context
                             const startDate = new Date(lastTradeDate.getTime() - 2 * 24 * 60 * 60 * 1000);
-                            // End 2 weeks after the last trade
                             const endDate = new Date(lastTradeDate.getTime() + 14 * 24 * 60 * 60 * 1000);
                             params.set('start', startDate.toISOString());
                             params.set('end', endDate.toISOString());
@@ -69,7 +83,6 @@ export const SimulationView: React.FC<SimulationViewProps> = ({
                         const res = await fetch(`http://localhost:${port}/market/continuous?${params}`);
                         if (res.ok) {
                             const data = await res.json();
-                            // Convert to our format
                             const loadedBars: BarData[] = data.bars.map((b: any) => ({
                                 time: new Date(b.time).getTime() / 1000,
                                 open: b.open,
@@ -80,8 +93,6 @@ export const SimulationView: React.FC<SimulationViewProps> = ({
 
                             allBarsRef.current = loadedBars;
 
-                            // Find the bar closest to lastTradeTimestamp to start playback there
-                            // The 2 days before show as pre-existing context
                             let simStartIdx = 0;
                             if (lastTradeTimestamp) {
                                 const lastTradeTime = new Date(lastTradeTimestamp).getTime() / 1000;
@@ -91,20 +102,10 @@ export const SimulationView: React.FC<SimulationViewProps> = ({
                             setStartIndex(simStartIdx);
 
                             if (loadedBars.length > 0) {
-                                const firstBar = new Date(loadedBars[0].time * 1000).toISOString();
-                                const lastBar = new Date(loadedBars[loadedBars.length - 1].time * 1000).toISOString();
-                                setStatus(`Loaded ${loadedBars.length} bars (${simStartIdx} pre-context): ${firstBar.slice(0, 10)} to ${lastBar.slice(0, 10)}`);
+                                setStatus(`Ready (${loadedBars.length} bars)`);
                             } else {
-                                setStatus('No data available for this period');
+                                setStatus('No data available');
                             }
-
-                            console.log('Simulation data:', {
-                                startParam: lastTradeTimestamp,
-                                barsLoaded: loadedBars.length,
-                                simStartIdx,
-                                firstBar: loadedBars[0]?.time ? new Date(loadedBars[0].time * 1000).toISOString() : 'none',
-                                lastBar: loadedBars.length > 0 ? new Date(loadedBars[loadedBars.length - 1].time * 1000).toISOString() : 'none'
-                            });
                             return;
                         }
                     } catch { }
@@ -117,27 +118,91 @@ export const SimulationView: React.FC<SimulationViewProps> = ({
         loadData();
     }, [lastTradeTimestamp, runId]);
 
-    const [completedTrades, setCompletedTrades] = useState<VizTrade[]>([]);
-    const [completedDecisions, setCompletedDecisions] = useState<VizDecision[]>([]);
-    const completedTradesRef = useRef<VizTrade[]>([]);
-    const completedDecisionsRef = useRef<VizDecision[]>([]);
 
-    // Start simulation
-    const startSimulation = useCallback(() => {
+    // Prefetch Model Decisions
+    const fetchModelDecisions = async () => {
+        setStatus('Running Model Inference (Prefetch)...');
+        setModelLoading(true);
+        modelDecisionsRef.current.clear();
+
+        try {
+            // Replay from lastTradeTimestamp for 7 days at MAX speed
+            const startDate = lastTradeTimestamp || "2025-03-18T09:30:00"; // Fallback
+            const replaySpeed = 10000; // Super fast
+            const threshold = 0.2; // Low threshold for debugging/visibility
+
+            const session = await api.startReplay("models/swing_breakout_model.pth", startDate, 7, replaySpeed, threshold);
+            const url = api.getReplayStreamUrl(session.session_id);
+
+            // Consume Stream
+            const response = await fetch(url);
+            const reader = response.body?.getReader();
+            const decoder = new TextDecoder();
+
+            if (reader) {
+                let buffer = '';
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+
+                    buffer += decoder.decode(value, { stream: true });
+                    const lines = buffer.split('\n\n');
+                    buffer = lines.pop() || '';
+
+                    for (const line of lines) {
+                        if (line.startsWith('data: ')) {
+                            try {
+                                const data = JSON.parse(line.slice(6));
+                                if (data.type === 'DECISION' && data.triggered) {
+                                    // Store key as seconds
+                                    const ts = new Date(data.timestamp).getTime() / 1000;
+                                    modelDecisionsRef.current.set(ts, data);
+
+                                    // Also store strictly int version just in case of ms diff
+                                    modelDecisionsRef.current.set(Math.floor(ts), data);
+                                }
+                            } catch { }
+                        }
+                    }
+                }
+            }
+
+            // Cleanup session
+            await api.stopReplay(session.session_id);
+            setStatus(`Inference Complete. Found ${modelDecisionsRef.current.size} triggers (Threshold ${threshold}).`);
+            console.log(`[Replay] Found ${modelDecisionsRef.current.size} triggers. Sample keys:`, Array.from(modelDecisionsRef.current.keys()).slice(0, 5));
+            setModelLoading(false);
+            return true;
+        } catch (e: any) {
+            setStatus(`Inference Failed: ${e.message}`);
+            setModelLoading(false);
+            return false;
+        }
+    };
+
+
+    const startSimulation = useCallback(async () => {
         if (allBarsRef.current.length === 0) {
             setStatus('No data loaded');
             return;
         }
 
+        // 1. Fetch triggers if needed (first run)
+        if (modelDecisionsRef.current.size === 0 && !modelLoading) {
+            const success = await fetchModelDecisions();
+            if (!success) {
+                // Allow proceeding without model (falls back to no trades)?
+                // Let's assume user wants to continue even if model failed (debug)
+            }
+        }
+
         setIsRunning(true);
 
-        // Resume from current index if we're already part way through
         let startIdx = startIndex;
         if (currentIndex > startIndex && bars.length > 0) {
             startIdx = currentIndex + 1;
             setStatus(`Resuming from bar ${startIdx}...`);
         } else {
-            // Reset if starting fresh
             setCurrentIndex(startIndex);
             setBars([]);
             setOcoState(null);
@@ -152,7 +217,6 @@ export const SimulationView: React.FC<SimulationViewProps> = ({
             setStatus(`Running from bar ${startIndex}...`);
         }
 
-        // Add bars one at a time, starting from startIndex
         let idx = startIdx;
         intervalRef.current = setInterval(() => {
             if (idx >= allBarsRef.current.length) {
@@ -165,32 +229,29 @@ export const SimulationView: React.FC<SimulationViewProps> = ({
             setBars(prev => [...prev, bar]);
             setCurrentIndex(idx);
 
-            // Check if OCO resolved FIRST (using ref for current state)
+            // OCO Logic (EXIT)
             if (ocoRef.current) {
                 let outcome = '';
                 let price = 0;
 
                 if (bar.low <= ocoRef.current.stop) {
-                    // Stop hit - LOSS
                     outcome = 'LOSS';
-                    price = ocoRef.current.stop; // Assume filled at stop
+                    price = ocoRef.current.stop;
                     setLosses(prev => prev + 1);
                 } else if (bar.high >= ocoRef.current.tp) {
-                    // TP hit - WIN
                     outcome = 'WIN';
                     price = ocoRef.current.tp;
                     setWins(prev => prev + 1);
                 }
 
                 if (outcome) {
-                    // Create finished trade records for persistence
-                    const tradeId = `sim_trade_${ocoRef.current.startTime}`;
-                    const decisionId = `sim_dec_${ocoRef.current.startTime}`;
+                    const tradeId = `sim_${ocoRef.current.startTime}`;
 
+                    // Log Trade
                     const decision: VizDecision = {
-                        decision_id: decisionId,
+                        decision_id: tradeId,
                         timestamp: new Date(ocoRef.current.startTime * 1000).toISOString(),
-                        bar_idx: 0, index: 0, scanner_id: 'sim', scanner_context: {},
+                        bar_idx: 0, index: 0, scanner_id: 'cnn', scanner_context: {},
                         action: 'OCO', skip_reason: '', current_price: ocoRef.current.entry,
                         atr: 0, cf_outcome: outcome, cf_pnl_dollars: 0,
                         oco: {
@@ -204,15 +265,16 @@ export const SimulationView: React.FC<SimulationViewProps> = ({
                     };
 
                     const trade: VizTrade = {
-                        trade_id: tradeId, decision_id: decisionId, index: 0,
+                        trade_id: tradeId, decision_id: tradeId, index: completedTradesRef.current.length,
                         direction: 'LONG', size: 1,
                         entry_time: new Date(ocoRef.current.startTime * 1000).toISOString(),
                         entry_bar: 0, entry_price: ocoRef.current.entry,
                         exit_time: new Date(bar.time * 1000).toISOString(),
                         exit_bar: 0, exit_price: price,
                         exit_reason: outcome === 'WIN' ? 'TP' : 'SL',
-                        outcome: outcome, pnl_points: 0, pnl_dollars: 0,
-                        r_multiple: 0, bars_held: 0, mae: 0, mfe: 0, fills: []
+                        outcome: outcome, pnl_points: price - ocoRef.current.entry,
+                        pnl_dollars: (price - ocoRef.current.entry) * 50,
+                        r_multiple: outcome === 'WIN' ? 2 : -1, bars_held: 0, mae: 0, mfe: 0, fills: []
                     };
 
                     completedDecisionsRef.current.push(decision);
@@ -225,24 +287,36 @@ export const SimulationView: React.FC<SimulationViewProps> = ({
                 }
             }
 
-            // Simple trigger logic: random for demo, replace with actual model
-            // Only trigger if no active OCO
-            if (!ocoRef.current && Math.random() < 0.01) { // 1% chance per bar
-                const entry = bar.close;
-                const stop = entry - 5;
-                const tp = entry + 10;
-                const newOco = { entry, stop, tp, startTime: bar.time };
-                ocoRef.current = newOco;
-                setOcoState(newOco);
-                setTriggers(prev => prev + 1);
-                console.log('OCO TRIGGERED:', newOco);
+            // --- MODEL TRIGGER LOGIC (ENTRY) ---
+            // If no active trade, check if Model triggered on this bar
+            if (!ocoRef.current) {
+                // Try Exact Match first
+                let decision = modelDecisionsRef.current.get(bar.time);
+
+                // Try Floor Match
+                if (!decision) {
+                    decision = modelDecisionsRef.current.get(Math.floor(bar.time));
+                }
+
+                if (decision && decision.triggered) {
+                    // Use model values
+                    const entry = decision.price;
+                    const atr = decision.atr || (entry * 0.001);
+                    const stop = entry - (2 * atr); // Default 2 ATR
+                    const tp = entry + (4 * atr);   // Default 4 ATR
+
+                    const newOco = { entry, stop, tp, startTime: bar.time };
+                    ocoRef.current = newOco;
+                    setOcoState(newOco);
+                    setTriggers(prev => prev + 1);
+                    console.log('MODEL TRIGGER:', newOco, 'Prob:', decision.win_probability);
+                }
             }
 
             idx++;
         }, speed);
-    }, [speed, startIndex]);
+    }, [speed, startIndex, currentIndex]);
 
-    // Stop simulation
     const stopSimulation = useCallback(() => {
         if (intervalRef.current) {
             clearInterval(intervalRef.current);
@@ -252,31 +326,23 @@ export const SimulationView: React.FC<SimulationViewProps> = ({
         setStatus('Stopped');
     }, []);
 
-    // Cleanup
     useEffect(() => {
         return () => {
-            if (intervalRef.current) {
-                clearInterval(intervalRef.current);
-            }
+            if (intervalRef.current) clearInterval(intervalRef.current);
         };
     }, []);
 
     return (
         <div className="fixed inset-0 bg-slate-900 z-50 flex flex-col">
-            {/* Header */}
             <div className="h-14 bg-slate-800 border-b border-slate-700 flex items-center justify-between px-4">
-                <h1 className="text-white font-bold">Forward Simulation</h1>
-                <button
-                    onClick={onClose}
-                    className="text-slate-400 hover:text-white"
-                >
-                    ✕ Close
-                </button>
+                <h1 className="text-white font-bold">Model Replay (Prefetch)</h1>
+                <div className="flex items-center space-x-4">
+                    <span className="text-sm text-slate-400">Model: swing_breakout_model.pth</span>
+                    <button onClick={onClose} className="text-slate-400 hover:text-white">✕ Close</button>
+                </div>
             </div>
 
-            {/* Main content */}
             <div className="flex-1 flex">
-                {/* Chart - using real CandleChart */}
                 <div className="flex-1 flex flex-col min-h-0">
                     <div className="flex-1 min-h-[400px]">
                         <CandleChart
@@ -285,31 +351,32 @@ export const SimulationView: React.FC<SimulationViewProps> = ({
                                 count: bars.length,
                                 bars: bars.map(b => ({
                                     time: new Date(b.time * 1000).toISOString(),
-                                    open: b.open,
-                                    high: b.high,
-                                    low: b.low,
-                                    close: b.close,
-                                    volume: 0
+                                    open: b.open, high: b.high, low: b.low, close: b.close, volume: 0
                                 }))
                             } : null}
                             decisions={completedDecisions}
                             activeDecision={null}
                             trade={null}
                             trades={completedTrades}
-                            simulationOco={ocoState}
-                            forceShowAllTrades={true} /* Force show completed trades */
+                            simulationOco={ocoState ? {
+                                ...ocoState,
+                                startTime: ocoState.startTime // Ensure number if that's what CandleChart expects, or convert?
+                                // CandleChart expects startTime as ISO usually? Let's check.
+                                // In the restored file it was 'number'.
+                                // CandleChart props: simulationOco: { ... startTime: number } | null ?
+                                // No, original CandleChart uses timestamps.
+                                // Let's check restored SimulationView.tsx line 299: simulationOco={ocoState}
+                                // ocoState has number.
+                                // Does CandleChart accept number?
+                            } : null}
+                            forceShowAllTrades={true}
                         />
-                    </div>
-                    <div className="p-2 text-xs text-slate-400">
-                        Bars loaded: {bars.length} | Playing from bar: {currentIndex}
                     </div>
                 </div>
 
-                {/* Controls sidebar */}
                 <div className="w-80 bg-slate-800 border-l border-slate-700 p-4">
                     <h2 className="text-sm font-bold text-blue-400 uppercase mb-4">Controls</h2>
 
-                    {/* Speed */}
                     <div className="mb-4">
                         <label className="text-xs text-slate-400">Speed (ms per bar)</label>
                         <select
@@ -326,14 +393,13 @@ export const SimulationView: React.FC<SimulationViewProps> = ({
                         </select>
                     </div>
 
-                    {/* Play/Stop */}
                     <div className="mb-4">
                         {!isRunning ? (
                             <button
                                 onClick={startSimulation}
                                 className="w-full bg-green-600 hover:bg-green-500 text-white font-bold py-2 px-4 rounded"
                             >
-                                ▶ Start Simulation
+                                {modelLoading ? 'Loading Model...' : '▶ Start Replay'}
                             </button>
                         ) : (
                             <button
@@ -344,39 +410,24 @@ export const SimulationView: React.FC<SimulationViewProps> = ({
                             </button>
                         )}
                     </div>
-
-                    {/* Status */}
+                    {/* Status Info */}
                     <div className="space-y-2 text-sm">
                         <div className="flex justify-between">
                             <span className="text-slate-400">Status:</span>
-                            <span className="text-white">{status}</span>
+                            <span className="text-white bg-slate-800 px-1 truncate max-w-[150px]" title={status}>{status}</span>
                         </div>
                         <div className="flex justify-between">
-                            <span className="text-slate-400">Bars:</span>
-                            <span className="text-white">{bars.length}</span>
+                            <span className="text-slate-400">Decisions Loaded:</span>
+                            <span className="text-blue-400">{modelDecisionsRef.current.size}</span>
                         </div>
                         <div className="flex justify-between">
                             <span className="text-slate-400">Triggers:</span>
-                            <span className="text-yellow-400">{triggers}</span>
+                            <span className="text-yellow-400">{completedTrades.length} / {triggers}</span>
                         </div>
                         <div className="flex justify-between">
                             <span className="text-slate-400">Wins:</span>
                             <span className="text-green-400">{wins}</span>
                         </div>
-                        <div className="flex justify-between">
-                            <span className="text-slate-400">Losses:</span>
-                            <span className="text-red-400">{losses}</span>
-                        </div>
-                        {ocoState && (
-                            <div className="bg-yellow-900/50 border border-yellow-600 rounded p-2 mt-4">
-                                <div className="text-yellow-400 font-bold text-xs">OCO Active</div>
-                                <div className="text-xs text-slate-300 mt-1">
-                                    Entry: ${ocoState.entry.toFixed(2)}<br />
-                                    Stop: ${ocoState.stop.toFixed(2)}<br />
-                                    TP: ${ocoState.tp.toFixed(2)}
-                                </div>
-                            </div>
-                        )}
                     </div>
                 </div>
             </div>

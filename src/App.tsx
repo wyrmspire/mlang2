@@ -7,6 +7,8 @@ import { CandleChart } from './components/CandleChart';
 import { DetailsPanel } from './components/DetailsPanel';
 import { ChatAgent } from './components/ChatAgent';
 import { SimulationView } from './components/SimulationView';
+import { StatsPanel } from './components/StatsPanel';
+
 const App: React.FC = () => {
   const [currentRun, setCurrentRun] = useState<string>('');
   const [mode, setMode] = useState<'DECISION' | 'TRADE'>('DECISION');
@@ -186,6 +188,9 @@ const App: React.FC = () => {
       {/* MAIN CONTENT */}
       <div className="flex-1 flex flex-col">
 
+        {/* STATS PANEL - Shows scan results: P&L, win rate, drawdown etc. */}
+        <StatsPanel decisions={decisions} startingBalance={50000} />
+
         {/* CHART AREA - Now always shows continuous data */}
         <div className="flex-1 relative bg-slate-900">
           <CandleChart
@@ -194,6 +199,7 @@ const App: React.FC = () => {
             activeDecision={activeDecision}
             trade={activeTrade}
             trades={trades}
+            defaultShowAllTrades={true}
           />
 
           {/* Floating Info Overlay */}

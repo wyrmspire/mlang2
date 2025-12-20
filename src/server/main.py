@@ -203,17 +203,47 @@ async def get_trades(run_id: str) -> List[Dict[str, Any]]:
     if not run_dir:
         raise HTTPException(404, f"Run {run_id} not found")
     
-    trades_file = find_jsonl_file(run_dir, ["trades.jsonl"])
+    # Check for explicit trades.jsonl first (don't use find_jsonl_file which has wildcard fallback)
+    trades_file = run_dir / "trades.jsonl"
     
-    if not trades_file:
-        return []  # OR data doesn't have separate trades file
+    if trades_file.exists():
+        # Load from explicit trades file
+        trades = []
+        with open(trades_file) as f:
+            for line in f:
+                if line.strip():
+                    trades.append(json.loads(line))
+        return trades
     
-    trades = []
-    with open(trades_file) as f:
-        for line in f:
-            if line.strip():
-                trades.append(json.loads(line))
-    return trades
+    # Fallback: derive trades from records.jsonl or decisions.jsonl
+    records_file = run_dir / "records.jsonl"
+    if not records_file.exists():
+        records_file = run_dir / "decisions.jsonl"
+    
+    if records_file.exists():
+        trades = []
+        with open(records_file) as f:
+            for i, line in enumerate(f):
+                if line.strip():
+                    r = json.loads(line)
+                    # Only convert if it was a triggered trade
+                    if 'best_oco' in r or 'oco' in r or r.get('scanner_context', {}).get('triggered', True):
+                        # Map record to VizTrade format
+                        trades.append({
+                            'trade_id': f"tr_{r.get('decision_id', i)}",
+                            'decision_id': r.get('decision_id'),
+                            'index': r.get('index', i),
+                            'direction': r.get('scanner_context', {}).get('direction', r.get('oco', {}).get('direction', 'LONG')),
+                            'size': r.get('contracts', 1),
+                            'pnl_dollars': r.get('best_pnl', 0.0),
+                            'entry_price': r.get('current_price', r.get('oco', {}).get('entry_price')),
+                            'outcome': 'WIN' if r.get('best_pnl', 0) > 0 else 'LOSS',
+                            'exit_price': 0,
+                            'exit_reason': 'SIMULATION'
+                        })
+        return trades
+    
+    return []
 
 
 @app.get("/runs/{run_id}/series")

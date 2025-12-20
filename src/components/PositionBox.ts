@@ -171,7 +171,8 @@ export function createTradePositionBoxes(
     startTime: Time,
     endTime: Time,
     direction: 'LONG' | 'SHORT',
-    tradeId: string = 'default'
+    tradeId: string = 'default',
+    labels?: { sl?: string; tp?: string }
 ): { slBox: PositionBox; tpBox: PositionBox; } {
 
     // SL Zone (red)
@@ -184,6 +185,8 @@ export function createTradePositionBoxes(
         fillColor: 'rgba(239, 68, 68, 0.15)',  // red-500 @ 15%
         borderColor: '#ef4444',
         borderWidth: 1,
+        label: labels?.sl,
+        labelColor: '#ef4444'
     });
 
     // TP Zone (green)
@@ -196,6 +199,8 @@ export function createTradePositionBoxes(
         fillColor: 'rgba(34, 197, 94, 0.15)',  // green-500 @ 15%
         borderColor: '#22c55e',
         borderWidth: 1,
+        label: labels?.tp,
+        labelColor: '#22c55e'
     });
 
     return { slBox, tpBox };

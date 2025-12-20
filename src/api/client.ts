@@ -146,5 +146,43 @@ export const api = {
             body: JSON.stringify(payload)
         });
         return response.json();
+    },
+
+    startReplay: async (modelPath: string, startDate?: string, days: number = 1, speed: number = 10.0, threshold: number = 0.6): Promise<any> => {
+        const hasBackend = await checkBackend();
+        if (!hasBackend) throw new Error('Backend unavailable');
+
+        const response = await fetch(`${API_BASE}/replay/start`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                model_path: modelPath,
+                start_date: startDate,
+                days: days,
+                speed: speed,
+                threshold: threshold
+            })
+        });
+
+        if (!response.ok) {
+            const err = await response.json();
+            throw new Error(err.detail || 'Failed to start replay');
+        }
+        return response.json();
+    },
+
+    stopReplay: async (sessionId: string): Promise<any> => {
+        const hasBackend = await checkBackend();
+        if (!hasBackend) return;
+
+        await fetch(`${API_BASE}/replay/sessions/${sessionId}`, {
+            method: 'DELETE'
+        });
+    },
+
+    getReplayStreamUrl: (sessionId: string) => {
+        // API_BASE is set by checkBackend hopefully? 
+        // We might need to ensure checkBackend is called, but startReplay calls it.
+        return `${API_BASE}/replay/stream/${sessionId}`;
     }
 };

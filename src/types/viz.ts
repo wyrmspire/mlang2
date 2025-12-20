@@ -52,6 +52,10 @@ export interface VizDecision {
   cf_pnl_dollars: number;
   window?: VizWindow | null;
   oco?: VizOCO | null;
+  oco_results?: Record<string, { outcome?: string; pnl_dollars?: number; bars_held?: number; exit_price?: number }>;
+  contracts?: number;
+  risk_dollars?: number;
+  reward_dollars?: number;
 }
 
 export interface VizFill {

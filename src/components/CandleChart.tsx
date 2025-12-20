@@ -18,9 +18,11 @@ interface CandleChartProps {
     trades?: VizTrade[];                    // All trades for overlay mode
     simulationOco?: SimulationOco | null;   // OCO state for simulation mode
     forceShowAllTrades?: boolean;           // Force showing all trades
+    defaultShowAllTrades?: boolean;         // Default state for showing all trades
 }
 
-type Timeframe = '1m' | '5m' | '15m';
+type Timeframe = '1m' | '5m' | '15m' | '1h' | '4h';
+
 
 // Aggregation helper for higher timeframes
 const aggregateData = (bars: BarData[], interval: number): BarData[] => {
@@ -78,7 +80,8 @@ export const CandleChart: React.FC<CandleChartProps> = ({
     trade,
     trades = [],
     simulationOco,
-    forceShowAllTrades = false
+    forceShowAllTrades = false,
+    defaultShowAllTrades = false
 }) => {
     const chartContainerRef = useRef<HTMLDivElement>(null);
     const chartRef = useRef<IChartApi | null>(null);
@@ -92,13 +95,17 @@ export const CandleChart: React.FC<CandleChartProps> = ({
 
     const [timeframe, setTimeframe] = useState<Timeframe>('1m');
     const [isLoading, setIsLoading] = useState(true);
-    const [showAllTrades, setShowAllTrades] = useState(false);
+    const [showAllTrades, setShowAllTrades] = useState(defaultShowAllTrades);
+
+    useEffect(() => {
+        setShowAllTrades(defaultShowAllTrades);
+    }, [defaultShowAllTrades]);
 
     // Process continuous data with current timeframe
     const chartData = useMemo(() => {
         if (!continuousData?.bars?.length) return [];
 
-        const intervalMap = { '1m': 1, '5m': 5, '15m': 15 };
+        const intervalMap: Record<Timeframe, number> = { '1m': 1, '5m': 5, '15m': 15, '1h': 60, '4h': 240 };
         const interval = intervalMap[timeframe];
         const aggregated = aggregateData(continuousData.bars, interval);
 
@@ -114,7 +121,7 @@ export const CandleChart: React.FC<CandleChartProps> = ({
     // Get aggregated bars for timestamp lookups
     const aggregatedBars = useMemo(() => {
         if (!continuousData?.bars?.length) return [];
-        const intervalMap = { '1m': 1, '5m': 5, '15m': 15 };
+        const intervalMap: Record<Timeframe, number> = { '1m': 1, '5m': 5, '15m': 15, '1h': 60, '4h': 240 };
         return aggregateData(continuousData.bars, intervalMap[timeframe]);
     }, [continuousData, timeframe]);
 
@@ -229,7 +236,8 @@ export const CandleChart: React.FC<CandleChartProps> = ({
     // Render all trades as position boxes
     useEffect(() => {
         const shouldShowAll = showAllTrades || forceShowAllTrades;
-        const interval = timeframe === '5m' ? 5 : timeframe === '15m' ? 15 : 1;
+        const intervalMap: Record<Timeframe, number> = { '1m': 1, '5m': 5, '15m': 15, '1h': 60, '4h': 240 };
+        const interval = intervalMap[timeframe];
 
         if (!seriesRef.current) return;
 
@@ -243,14 +251,16 @@ export const CandleChart: React.FC<CandleChartProps> = ({
 
         if (!shouldShowAll) return;
         if (!aggregatedBars.length || !continuousData?.bars?.length) return;
-        if (!trades.length) return;
 
-        // Create boxes for each trade
-        trades.forEach(t => {
-            const decision = decisions.find(d => d.decision_id === t.decision_id);
-            if (!decision?.oco || !decision.timestamp) return;
+        // Use decisions directly instead of trades to bypass backend mapping issues
+        const itemsToRender = decisions.filter(d => d.oco && d.timestamp);
+        if (!itemsToRender.length) return;
 
+        // Create boxes for each decision with OCO data
+        itemsToRender.forEach((decision, idx) => {
             const oco = decision.oco;
+            if (!oco?.entry_price || !oco?.stop_price || !oco?.tp_price) return;
+
             // Snap start time to current timeframe interval
             const rawStartIdx = findBarIndex(continuousData.bars, decision.timestamp);
             const snappedStartIdx = Math.floor(rawStartIdx / interval);
@@ -258,26 +268,30 @@ export const CandleChart: React.FC<CandleChartProps> = ({
             if (!snappedStartBar) return;
             const startTime = parseTime(snappedStartBar.time) as Time;
 
-            // Calculate end time
-            let endTime = startTime;
-            if (t.exit_time) {
-                const rawExitIdx = findBarIndex(continuousData.bars, t.exit_time);
-                const snappedExitIdx = Math.floor(rawExitIdx / interval);
-                const snappedExitBar = aggregatedBars[Math.min(snappedExitIdx, aggregatedBars.length - 1)];
-                if (snappedExitBar) {
-                    endTime = parseTime(snappedExitBar.time) as Time;
-                }
-            } else if (t.bars_held) {
-                // Estimate based on bars held (adjusted for interval)
-                const barsHeldAdjusted = Math.ceil(t.bars_held / interval);
-                const endIdx = Math.min(snappedStartIdx + barsHeldAdjusted, aggregatedBars.length - 1);
-                const endBar = aggregatedBars[endIdx];
-                if (endBar) {
-                    endTime = parseTime(endBar.time) as Time;
-                }
-            }
+            // Calculate end time using bars_held from oco_results if available
+            const ocoResults = decision.oco_results || {};
+            const bestOco = Object.values(ocoResults)[0] as { bars_held?: number } | undefined;
+            const barsHeld = bestOco?.bars_held || 30; // Fallback to 30 mins if not available
+
+            // Convert bars_held (which is in 1m bars) to current timeframe bars
+            const barsInTimeframe = Math.max(1, Math.ceil(barsHeld / interval));
+            const endIdx = Math.min(snappedStartIdx + barsInTimeframe, aggregatedBars.length - 1);
+            const endBar = aggregatedBars[endIdx];
+            const endTime = endBar ? parseTime(endBar.time) as Time : startTime;
 
             const direction = (decision.scanner_context?.direction || oco.direction || 'LONG') as 'LONG' | 'SHORT';
+
+            // Format labels with dynamic risk info
+            const contracts = decision.contracts || decision.scanner_context?.contracts || 1;
+            const riskDollars = decision.risk_dollars || decision.scanner_context?.risk_dollars;
+            const rewardDollars = decision.reward_dollars || decision.scanner_context?.reward_dollars;
+
+            const riskStr = riskDollars
+                ? `-$${Math.round(riskDollars)} (${contracts}x)`
+                : '';
+            const rewardStr = rewardDollars
+                ? `+$${Math.round(rewardDollars)}`
+                : '';
 
             const { slBox, tpBox } = createTradePositionBoxes(
                 oco.entry_price,
@@ -286,17 +300,18 @@ export const CandleChart: React.FC<CandleChartProps> = ({
                 startTime,
                 endTime,
                 direction,
-                t.trade_id || t.decision_id
+                decision.decision_id || `dec_${idx}`,
+                { sl: riskStr, tp: rewardStr }
             );
 
             // Attach boxes
             seriesRef.current?.attachPrimitive(slBox);
             seriesRef.current?.attachPrimitive(tpBox);
 
-            allTradesBoxesRef.current.set(t.trade_id || t.decision_id, [slBox, tpBox]);
+            allTradesBoxesRef.current.set(decision.decision_id || `dec_${idx}`, [slBox, tpBox]);
         });
 
-    }, [showAllTrades, forceShowAllTrades, trades, decisions, aggregatedBars, continuousData, timeframe]);
+    }, [showAllTrades, forceShowAllTrades, decisions, aggregatedBars, continuousData, timeframe]);
 
     // Handle active decision - scroll to it and show position boxes
     useEffect(() => {
@@ -460,14 +475,14 @@ export const CandleChart: React.FC<CandleChartProps> = ({
             <div className="absolute top-3 right-3 flex flex-col gap-2 z-10">
                 {/* Timeframe Controls */}
                 <div className="flex bg-slate-800 rounded-md border border-slate-700 shadow-lg overflow-hidden">
-                    {(['1m', '5m', '15m'] as Timeframe[]).map((tf) => (
+                    {(['1m', '5m', '15m', '1h', '4h'] as Timeframe[]).map((tf, idx, arr) => (
                         <button
                             key={tf}
                             onClick={() => setTimeframe(tf)}
                             className={`px-3 py-1 text-xs font-bold transition-colors ${timeframe === tf
                                 ? 'bg-blue-600 text-white'
                                 : 'bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-slate-200'
-                                } ${tf !== '15m' ? 'border-r border-slate-700' : ''}`}
+                                } ${idx !== arr.length - 1 ? 'border-r border-slate-700' : ''}`}
                         >
                             {tf}
                         </button>

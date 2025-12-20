@@ -1,0 +1,349 @@
+import React, { useState, useCallback, useRef, useEffect } from 'react';
+import { CandleChart } from './CandleChart';
+import { VizTrade, VizDecision, VizOCO, BarData as VizBarData } from '../types/viz';
+import { api } from '../api/client';
+
+interface SimulationViewProps {
+    onClose: () => void;
+    runId?: string;
+    lastTradeTimestamp?: string;
+}
+
+export const SimulationView: React.FC<SimulationViewProps> = ({
+    onClose,
+    runId,
+    lastTradeTimestamp
+}) => {
+    const [isRunning, setIsRunning] = useState(false);
+    const [speed, setSpeed] = useState(10.0);
+    const [bars, setBars] = useState<VizBarData[]>([]);
+    const [status, setStatus] = useState('Loading context...');
+    const [ocoState, setOcoState] = useState<{ entry: number, stop: number, tp: number, startTime: string } | null>(null);
+    const [triggers, setTriggers] = useState(0);
+    const [wins, setWins] = useState(0);
+    const [losses, setLosses] = useState(0);
+
+    const [sessionId, setSessionId] = useState<string | null>(null);
+    const abortControllerRef = useRef<AbortController | null>(null);
+
+    // Trade management
+    const ocoRef = useRef<{ entry: number, stop: number, tp: number, startTime: string } | null>(null);
+    const [completedTrades, setCompletedTrades] = useState<VizTrade[]>([]);
+    const [completedDecisions, setCompletedDecisions] = useState<VizDecision[]>([]);
+
+    const completedTradesRef = useRef<VizTrade[]>([]);
+    const completedDecisionsRef = useRef<VizDecision[]>([]);
+
+    // 1. Load Historical Context
+    useEffect(() => {
+        const loadContextData = async () => {
+            if (!lastTradeTimestamp) {
+                setStatus('Ready (No context)');
+                return;
+            }
+
+            try {
+                const lastTradeDate = new Date(lastTradeTimestamp);
+                const startDate = new Date(lastTradeDate.getTime() - 2 * 24 * 60 * 60 * 1000);
+                const endDate = lastTradeDate;
+
+                const data = await api.getContinuousContract(
+                    startDate.toISOString(),
+                    endDate.toISOString(),
+                    '1m'
+                );
+
+                if (data && data.bars) {
+                    const contextBars: VizBarData[] = data.bars.map((b: any) => ({
+                        time: new Date(b.time).toISOString(),
+                        open: b.open,
+                        high: b.high,
+                        low: b.low,
+                        close: b.close,
+                        volume: b.volume
+                    }));
+                    setBars(contextBars);
+                    setStatus(`Ready (${contextBars.length} context bars)`);
+                }
+            } catch (e) {
+                console.error("Failed to load context", e);
+                setStatus('Ready (Context load failed)');
+            }
+        };
+
+        loadContextData();
+    }, [lastTradeTimestamp]);
+
+
+    const stopSimulation = useCallback(async () => {
+        if (abortControllerRef.current) {
+            abortControllerRef.current.abort();
+            abortControllerRef.current = null;
+        }
+        if (sessionId) {
+            try { await api.stopReplay(sessionId); } catch { }
+            setSessionId(null);
+        }
+        setIsRunning(false);
+        setStatus('Stopped');
+    }, [sessionId]);
+
+    const startSimulation = useCallback(async () => {
+        if (isRunning) return;
+
+        try {
+            const startDate = lastTradeTimestamp || "2025-03-18T09:30:00";
+            setStatus(`Starting session from ${startDate}...`);
+
+            setTriggers(0);
+            setWins(0);
+            setLosses(0);
+            setCompletedTrades([]);
+            setCompletedDecisions([]);
+            completedTradesRef.current = [];
+            completedDecisionsRef.current = [];
+            ocoRef.current = null;
+            setOcoState(null);
+
+            const modelPath = "models/swing_breakout_model.pth";
+            const session = await api.startReplay(modelPath, startDate, 5, speed);
+            setSessionId(session.session_id);
+            setIsRunning(true);
+
+            const url = api.getReplayStreamUrl(session.session_id);
+            setStatus(`Connecting to stream...`);
+
+            // Use FETCH with ReadableStream instead of EventSource
+            const controller = new AbortController();
+            abortControllerRef.current = controller;
+
+            try {
+                const response = await fetch(url, {
+                    signal: controller.signal
+                });
+
+                if (!response.ok) {
+                    throw new Error(`Stream error: ${response.status}`);
+                }
+
+                if (!response.body) {
+                    throw new Error("No response body");
+                }
+
+                setStatus('Stream Connected. Receiving data...');
+
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                let buffer = '';
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+
+                    buffer += decoder.decode(value, { stream: true });
+
+                    // Process lines
+                    const lines = buffer.split('\n\n');
+                    // Keep the last partial chunk in buffer
+                    buffer = lines.pop() || '';
+
+                    for (const line of lines) {
+                        if (line.startsWith('data: ')) {
+                            try {
+                                const jsonStr = line.slice(6); // remove 'data: '
+                                const data = JSON.parse(jsonStr);
+                                handleEvent(data);
+                            } catch (e) {
+                                console.error('JSON Parse error', e);
+                            }
+                        }
+                    }
+                }
+            } catch (e: any) {
+                if (e.name !== 'AbortError') {
+                    setStatus(`Stream Error: ${e.message}`);
+                    setIsRunning(false);
+                }
+            }
+
+        } catch (e: any) {
+            setStatus(`Error: ${e.message}`);
+            setIsRunning(false);
+        }
+    }, [isRunning, lastTradeTimestamp, speed, stopSimulation]);
+
+    const handleEvent = (data: any) => {
+        if (data.type === 'BAR') {
+            const bar: VizBarData = {
+                time: data.timestamp,
+                open: data.open,
+                high: data.high,
+                low: data.low,
+                close: data.close,
+                volume: data.volume
+            };
+
+            setBars(prev => [...prev, bar]);
+
+            if (ocoRef.current) {
+                checkTradeOutcome(bar, ocoRef.current);
+            }
+
+        } else if (data.type === 'DECISION') {
+            if (data.triggered && !ocoRef.current) {
+                const entry = data.price;
+                const atr = data.atr || (entry * 0.001);
+                const stop = entry - (2 * atr);
+                const tp = entry + (4 * atr);
+
+                const newOco = {
+                    entry,
+                    stop,
+                    tp,
+                    startTime: data.timestamp
+                };
+
+                ocoRef.current = newOco;
+                setOcoState(newOco);
+                setTriggers(prev => prev + 1);
+            }
+        } else if (data.type === 'REPLAY_END') {
+            setStatus('Replay Completed');
+            stopSimulation();
+        }
+    };
+
+    const checkTradeOutcome = (bar: VizBarData, oco: { entry: number, stop: number, tp: number, startTime: string }) => {
+        let outcome = '';
+        let exitPrice = 0;
+
+        if (bar.low <= oco.stop) {
+            outcome = 'LOSS';
+            exitPrice = oco.stop;
+        } else if (bar.high >= oco.tp) {
+            outcome = 'WIN';
+            exitPrice = oco.tp;
+        }
+
+        if (outcome) {
+            const id = `rep_${oco.startTime}`;
+            const trade: VizTrade = {
+                trade_id: id, decision_id: id, index: completedTradesRef.current.length,
+                direction: 'LONG', size: 1,
+                entry_time: oco.startTime, entry_bar: 0, entry_price: oco.entry,
+                exit_time: bar.time, exit_bar: 0, exit_price: exitPrice,
+                exit_reason: outcome, outcome: outcome,
+                pnl_points: exitPrice - oco.entry, pnl_dollars: (exitPrice - oco.entry) * 50,
+                r_multiple: outcome === 'WIN' ? 2 : -1,
+                bars_held: 0, mae: 0, mfe: 0, fills: []
+            };
+
+            completedTradesRef.current.push(trade);
+            setCompletedTrades([...completedTradesRef.current]);
+
+            if (outcome === 'WIN') setWins(prev => prev + 1);
+            else setLosses(prev => prev + 1);
+
+            ocoRef.current = null;
+            setOcoState(null);
+        }
+    };
+
+    useEffect(() => {
+        return () => {
+            if (abortControllerRef.current) abortControllerRef.current.abort();
+            if (sessionId) api.stopReplay(sessionId).catch(() => { });
+        };
+    }, [sessionId]);
+
+    return (
+        <div className="fixed inset-0 bg-slate-900 z-50 flex flex-col">
+            <div className="h-14 bg-slate-800 border-b border-slate-700 flex items-center justify-between px-4">
+                <h1 className="text-white font-bold">Live Model Replay</h1>
+                <div className="flex items-center space-x-4">
+                    <span className="text-sm text-slate-400">Model: swing_breakout_model.pth</span>
+                    <button onClick={onClose} className="text-slate-400 hover:text-white">✕ Close</button>
+                </div>
+            </div>
+
+            <div className="flex-1 flex">
+                <div className="flex-1 flex flex-col min-h-0">
+                    <div className="flex-1 min-h-[400px]">
+                        <CandleChart
+                            continuousData={bars.length > 0 ? { timeframe: '1m', count: bars.length, bars: bars } : null}
+                            decisions={completedDecisions}
+                            activeDecision={null}
+                            trade={null}
+                            trades={completedTrades}
+                            simulationOco={ocoState ? {
+                                ...ocoState,
+                                startTime: new Date(ocoState.startTime).getTime() / 1000
+                            } : null}
+                            forceShowAllTrades={true}
+                        />
+                    </div>
+                </div>
+
+                <div className="w-80 bg-slate-800 border-l border-slate-700 p-4">
+                    <h2 className="text-sm font-bold text-blue-400 uppercase mb-4">Controls</h2>
+                    <div className="mb-4">
+                        <label className="text-xs text-slate-400">Speed (Multiplier)</label>
+                        <select
+                            value={speed}
+                            onChange={e => setSpeed(parseFloat(e.target.value))}
+                            disabled={isRunning}
+                            className="w-full bg-slate-900 border border-slate-600 rounded px-2 py-1 text-sm text-white"
+                        >
+                            <option value={1.0}>1x (Real-time)</option>
+                            <option value={10.0}>10x</option>
+                            <option value={50.0}>50x</option>
+                            <option value={100.0}>100x</option>
+                            <option value={500.0}>500x</option>
+                        </select>
+                    </div>
+
+                    <div className="mb-4">
+                        {!isRunning ? (
+                            <button
+                                onClick={startSimulation}
+                                className="w-full bg-green-600 hover:bg-green-500 text-white font-bold py-2 px-4 rounded"
+                            >
+                                ▶ Start Replay
+                            </button>
+                        ) : (
+                            <button
+                                onClick={stopSimulation}
+                                className="w-full bg-red-600 hover:bg-red-500 text-white font-bold py-2 px-4 rounded"
+                            >
+                                ■ Stop
+                            </button>
+                        )}
+                    </div>
+                    {/* Status Info */}
+                    <div className="space-y-2 text-sm border-t border-slate-700 pt-4">
+                        <div className="flex justify-between">
+                            <span className="text-slate-400">Status:</span>
+                            <span className="text-white bg-slate-800 px-1 truncate max-w-[150px]" title={status}>{status}</span>
+                        </div>
+                        <div className="flex justify-between">
+                            <span className="text-slate-400">Bars:</span>
+                            <span className="text-white">{bars.length}</span>
+                        </div>
+                        <div className="flex justify-between">
+                            <span className="text-slate-400">Triggers:</span>
+                            <span className="text-yellow-400">{triggers}</span>
+                        </div>
+                        <div className="flex justify-between">
+                            <span className="text-slate-400">Wins:</span>
+                            <span className="text-green-400">{wins}</span>
+                        </div>
+                        <div className="flex justify-between">
+                            <span className="text-slate-400">Losses:</span>
+                            <span className="text-red-400">{losses}</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+};

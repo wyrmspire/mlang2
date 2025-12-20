@@ -15,6 +15,34 @@ from src.sim.bar_fill_model import BarFillConfig, BarFillEngine
 from src.sim.costs import CostModel, DEFAULT_COSTS
 
 
+def find_bar_idx_by_time(df: pd.DataFrame, timestamp: pd.Timestamp) -> int:
+    """
+    Find the bar index in df that matches or is closest to the given timestamp.
+    
+    This is more accurate than multiplying by timeframe ratio, especially
+    when there are gaps in the data (weekends, holidays).
+    
+    Args:
+        df: DataFrame with 'time' column
+        timestamp: Target timestamp
+        
+    Returns:
+        Index of the matching or closest bar
+    """
+    if 'time' not in df.columns:
+        raise ValueError("DataFrame must have 'time' column")
+    
+    # Find first bar at or after target time
+    mask = df['time'] >= timestamp
+    matches = df[mask]
+    
+    if len(matches) > 0:
+        return matches.index[0]
+    
+    # If no match, return last bar
+    return len(df) - 1
+
+
 @dataclass
 class CounterfactualLabel:
     """

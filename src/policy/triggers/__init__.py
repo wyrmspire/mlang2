@@ -8,6 +8,7 @@ from .base import Trigger, TriggerResult, TriggerDirection
 from .time_trigger import TimeTrigger
 from .candle_patterns import CandlePatternTrigger, CandlePattern
 from .indicator_triggers import EMACrossTrigger, RSIThresholdTrigger
+from .structure_break import StructureBreakTrigger
 
 # Registry of all available triggers
 TRIGGER_REGISTRY = {
@@ -15,6 +16,7 @@ TRIGGER_REGISTRY = {
     "candle_pattern": CandlePatternTrigger,
     "ema_cross": EMACrossTrigger,
     "rsi_threshold": RSIThresholdTrigger,
+    "structure_break": StructureBreakTrigger,
 }
 
 

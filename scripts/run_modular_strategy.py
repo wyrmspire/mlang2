@@ -5,21 +5,34 @@ Runs a backtest using a modular Trigger and Bracket configuration.
 """
 
 import os
+import sys
 import argparse
 import json
 import pandas as pd
 from datetime import timedelta
 from pathlib import Path
 
+# Add parent dir to path for imports
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
 from src.config import RESULTS_DIR, NY_TZ
 from src.data.loader import load_continuous_contract
 from src.data.resample import resample_all_timeframes
 from src.features.indicators import calculate_atr
-from src.policy.stepper import MarketStepper
-from src.features.bundle import compute_features, FeatureConfig
+from src.sim.stepper import MarketStepper
+from src.features.pipeline import compute_features, FeatureConfig
 from src.policy.modular_scanner import ModularScanner
 from src.policy.brackets import bracket_from_dict
-from scripts.run_or_multi_oco import get_raw_ohlcv_window, compute_smart_stop_counterfactual
+from src.labels.counterfactual import compute_smart_stop_counterfactual
+
+
+def get_raw_ohlcv_window(stepper, lookback=60, lookahead=30):
+    """Get raw OHLCV for chart viz."""
+    current = stepper.get_current_idx()
+    start = max(0, current - lookback)
+    end = min(len(stepper.df), current + lookahead)
+    window = stepper.df.iloc[start:end]
+    return window[['open', 'high', 'low', 'close', 'volume']].values.tolist()
 
 
 def main():
@@ -27,6 +40,8 @@ def main():
     parser.add_argument("--config", type=str, required=True, help="JSON configuration")
     parser.add_argument("--start-date", type=str, default="2025-03-17", help="Start date")
     parser.add_argument("--weeks", type=int, default=1, help="Number of weeks")
+    parser.add_argument("--timeframe", type=str, default="1m", 
+                        choices=["1m", "5m", "15m", "1h"], help="Timeframe for scanning")
     parser.add_argument("--out", type=str, default=None, help="Output directory")
     
     args = parser.parse_args()
@@ -72,14 +87,24 @@ def main():
     htf_data = resample_all_timeframes(df)
     df_5m = htf_data.get('5m')
     df_15m = htf_data.get('15m')
-    df_5m['atr'] = calculate_atr(df_5m, 14)
-    avg_atr = df_5m['atr'].dropna().mean()
+    df_1h = htf_data.get('1h')
+    
+    # Select timeframe for scanning
+    tf_map = {'1m': df, '5m': df_5m, '15m': df_15m, '1h': df_1h}
+    df_tf = tf_map.get(args.timeframe, df)
+    
+    if df_tf is not None and len(df_tf) > 14:
+        df_tf['atr'] = calculate_atr(df_tf, 14)
+        avg_atr = df_tf['atr'].dropna().mean()
+    else:
+        avg_atr = 10.0
+    print(f"  Using {args.timeframe}: {len(df_tf) if df_tf is not None else 0} bars, avg ATR: {avg_atr:.2f}")
     
     # 3. Initialize Components
     scanner = ModularScanner(trigger_config)
     bracket = bracket_from_dict(bracket_config)
     
-    stepper = MarketStepper(df, start_idx=200, end_idx=len(df)-200)
+    stepper = MarketStepper(df_tf if df_tf is not None else df, start_idx=50, end_idx=len(df_tf)-50 if df_tf is not None else len(df)-200)
     feature_config = FeatureConfig(lookback_1m=30)
     
     records = []
@@ -93,7 +118,12 @@ def main():
             break
             
         features = compute_features(stepper, feature_config, df_5m=df_5m, df_15m=df_15m)
-        scan = scanner.scan(features.market_state, features)
+        
+        # Slice df_tf to current bar position (causal)
+        df_tf_slice = df_tf.iloc[:step.bar_idx + 1] if step.bar_idx < len(df_tf) else df_tf
+        
+        # Pass HTF data to trigger via kwargs
+        scan = scanner.scan(features.market_state, features, df_15m=df_tf_slice)
         
         if scan.triggered:
             direction = scan.context['direction']
@@ -111,8 +141,7 @@ def main():
                 entry_idx=step.bar_idx,
                 direction=direction,
                 stop_price=levels.stop_price,
-                tp_multiple=levels.r_multiple, # Relative
-                tp_price=levels.tp_price, # Absolute
+                tp_multiple=levels.r_multiple,
                 atr=atr,
                 oco_name="modular"
             )
@@ -150,6 +179,8 @@ def main():
                     'modular': {
                         'outcome': cf.outcome,
                         'pnl_dollars': cf.pnl_dollars,
+                        'bars_held': int(cf.bars_held),
+                        'exit_price': float(cf.exit_price),
                     }
                 },
                 'best_oco': 'modular',

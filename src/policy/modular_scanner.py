@@ -28,18 +28,19 @@ class ModularScanner(Scanner):
     def scanner_id(self) -> str:
         return f"modular_{self._trigger.trigger_id}"
     
-    def scan(self, state, features) -> ScannerResult:
+    def scan(self, state, features, **kwargs) -> ScannerResult:
         # Check cooldown
         current_idx = features.bar_idx if hasattr(features, 'bar_idx') else 0
         if current_idx - self._last_trigger_idx < self._cooldown_bars:
-            return ScannerResult(triggered=False)
+            return ScannerResult(scanner_id=self.scanner_id, triggered=False)
         
-        # Check trigger
-        res = self._trigger.check(features)
+        # Check trigger (pass any extra kwargs like df_15m)
+        res = self._trigger.check(features, **kwargs)
         
         if res.triggered:
             self._last_trigger_idx = current_idx
             return ScannerResult(
+                scanner_id=self.scanner_id,
                 triggered=True,
                 context={
                     "direction": res.direction.value,
@@ -48,7 +49,7 @@ class ModularScanner(Scanner):
                 }
             )
         
-        return ScannerResult(triggered=False)
+        return ScannerResult(scanner_id=self.scanner_id, triggered=False)
 
     def reset(self):
         self._trigger.reset()
