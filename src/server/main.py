@@ -18,6 +18,17 @@ import httpx
 from src.config import RESULTS_DIR
 from src.data.loader import load_continuous_contract
 from src.data.resample import resample_all_timeframes
+from src.core.manifest import RunManifest
+from src.core.registries import ScannerRegistry, ModelRegistry, IndicatorRegistry
+
+# Initialize registries on startup
+from src.policy.scanner_registry_init import register_all_scanners
+from src.models.model_registry_init import register_all_models
+from src.features.indicator_registry_init import register_all_indicators
+
+register_all_scanners()
+register_all_models()
+register_all_indicators()
 
 
 app = FastAPI(title="MLang2 API", version="1.0.0")
@@ -572,3 +583,163 @@ async def health():
         "results_dir": str(RESULTS_DIR),
         "available_runs": runs
     }
+
+
+# =============================================================================
+# ENDPOINTS: Run Manifest
+# =============================================================================
+
+@app.get("/runs/{run_id}/manifest")
+async def get_run_manifest(run_id: str) -> Dict[str, Any]:
+    """
+    Get run manifest - unified contract for all run outputs.
+    
+    This endpoint tells the UI what a run contains:
+    - What mode it was (SCAN/REPLAY/TRAIN)
+    - What scanners/models were used
+    - What artifacts are available
+    """
+    run_dir = find_run_dir(run_id)
+    if not run_dir:
+        raise HTTPException(404, f"Run {run_id} not found")
+    
+    manifest_path = run_dir / "manifest.json"
+    
+    # Try to load existing manifest
+    if manifest_path.exists():
+        try:
+            manifest = RunManifest.load(manifest_path)
+            return manifest.to_dict()
+        except Exception as e:
+            # Fall through to legacy inference
+            pass
+    
+    # Legacy: Infer manifest from available files
+    # (for runs created before manifest was implemented)
+    from src.core.enums import RunMode
+    
+    has_decisions = (run_dir / "decisions.jsonl").exists()
+    has_trades = (run_dir / "trades.jsonl").exists()
+    has_events = (run_dir / "events.jsonl").exists()
+    
+    # Infer mode
+    if has_events:
+        run_mode = RunMode.REPLAY
+    elif has_trades:
+        run_mode = RunMode.TRAIN
+    else:
+        run_mode = RunMode.SCAN
+    
+    manifest = RunManifest(
+        run_id=run_id,
+        created_at="",  # Unknown
+        run_mode=run_mode,
+        scanners=[],  # Unknown
+        models=[],  # Unknown
+    )
+    
+    # Set artifact refs based on what exists
+    if has_decisions:
+        manifest.artifacts.decisions = f"{run_id}/decisions.jsonl"
+    if has_trades:
+        manifest.artifacts.trades = f"{run_id}/trades.jsonl"
+    if has_events:
+        manifest.artifacts.events = f"{run_id}/events.jsonl"
+    if (run_dir / "full_series.json").exists():
+        manifest.artifacts.series = f"{run_id}/full_series.json"
+    
+    return manifest.to_dict()
+
+
+# =============================================================================
+# ENDPOINTS: Plugin Registries
+# =============================================================================
+
+@app.get("/registries/scanners")
+async def list_scanners() -> Dict[str, Any]:
+    """
+    List all available scanners from the registry.
+    
+    UI can populate dropdowns from this.
+    Agent can discover capabilities.
+    """
+    scanners = ScannerRegistry.list_all()
+    return {
+        "scanners": [
+            {
+                "scanner_id": s.scanner_id,
+                "name": s.name,
+                "description": s.description,
+                "params_schema": s.params_schema,
+            }
+            for s in scanners
+        ]
+    }
+
+
+@app.get("/registries/models")
+async def list_models() -> Dict[str, Any]:
+    """List all available models from the registry."""
+    models = ModelRegistry.list_all()
+    return {
+        "models": [
+            {
+                "model_id": m.model_id,
+                "name": m.name,
+                "description": m.description,
+                "input_schema": m.input_schema,
+                "output_schema": m.output_schema,
+            }
+            for m in models
+        ]
+    }
+
+
+@app.get("/registries/indicators")
+async def list_indicators() -> Dict[str, Any]:
+    """List all available indicators from the registry."""
+    indicators = IndicatorRegistry.list_all()
+    return {
+        "indicators": [
+            {
+                "indicator_id": i.indicator_id,
+                "name": i.name,
+                "description": i.description,
+                "output_type": i.output_type,
+                "params_schema": i.params_schema,
+            }
+            for i in indicators
+        ]
+    }
+
+
+@app.get("/runs/{run_id}/indicators")
+async def get_run_indicators(
+    run_id: str,
+    indicator_ids: List[str] = Query(default=[])
+) -> Dict[str, Any]:
+    """
+    Get indicator series for a run.
+    
+    Returns first-class indicator series (not hardcoded visuals).
+    Frontend overlay renderer draws them generically.
+    """
+    # Placeholder - real implementation would:
+    # 1. Load run data
+    # 2. Compute requested indicators using IndicatorRegistry
+    # 3. Return series in standard format
+    
+    return {
+        "run_id": run_id,
+        "series": [
+            # Example structure:
+            # {
+            #   "indicator_id": "ema_20",
+            #   "name": "EMA 20",
+            #   "type": "line",
+            #   "points": [{"time": "...", "value": 5000.0}, ...],
+            #   "style": {"color": "#00ff00", "lineWidth": 2}
+            # }
+        ]
+    }
+
