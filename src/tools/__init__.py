@@ -11,6 +11,7 @@ from .pattern_scanner import PatternScanner
 from .validation import StrategyValidator
 from .catalog import ToolCatalog
 from .simulation_runner import SimulationRunner
+from .cookbook import AgentCookbook
 
 __all__ = [
     'StrategyBuilder',
@@ -19,4 +20,5 @@ __all__ = [
     'StrategyValidator',
     'ToolCatalog',
     'SimulationRunner',
+    'AgentCookbook',
 ]
