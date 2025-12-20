@@ -21,6 +21,15 @@ from src.data.resample import resample_all_timeframes
 from src.core.manifest import RunManifest
 from src.core.registries import ScannerRegistry, ModelRegistry, IndicatorRegistry
 
+# Initialize registries on startup
+from src.policy.scanner_registry_init import register_all_scanners
+from src.models.model_registry_init import register_all_models
+from src.features.indicator_registry_init import register_all_indicators
+
+register_all_scanners()
+register_all_models()
+register_all_indicators()
+
 
 app = FastAPI(title="MLang2 API", version="1.0.0")
 
