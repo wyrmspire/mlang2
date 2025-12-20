@@ -16,6 +16,7 @@ import json
 from src.core.enums import RunMode, ModelRole
 from src.experiments.config import ExperimentConfig, ReplayConfig
 from src.experiments.strategy_config import StrategyConfig
+from src.sim.multi_oco import MultiOCOConfig, MultiOCOResult
 
 
 @dataclass
@@ -44,6 +45,10 @@ class SimulationResult:
     model_role: str
     inference_count: int
     
+    # Multi-OCO results (if used)
+    multi_oco_results: List[Any] = None
+    best_oco_config: Optional[str] = None
+    
     def to_dict(self) -> Dict[str, Any]:
         return {
             'run_id': self.run_id,
@@ -62,6 +67,8 @@ class SimulationResult:
             'inference_count': self.inference_count,
             'trade_count': len(self.trades),
             'decision_count': len(self.decisions),
+            'multi_oco_results': self.multi_oco_results if self.multi_oco_results else [],
+            'best_oco_config': self.best_oco_config,
         }
     
     def summary(self) -> str:
@@ -85,6 +92,10 @@ Model Inference:
   Role: {self.model_role}
   Inference Calls: {self.inference_count}
   Decisions Made: {len(self.decisions)}
+
+Multi-OCO:
+  Used: {'Yes' if self.multi_oco_results else 'No'}
+  Best Config: {self.best_oco_config or 'N/A'}
 """
 
 
@@ -134,6 +145,7 @@ class SimulationRunner:
         start_date: str = None,
         end_date: str = None,
         replay_config: Optional[ReplayConfig] = None,
+        multi_oco_config: Optional[MultiOCOConfig] = None,
         **kwargs
     ) -> SimulationResult:
         """
@@ -146,10 +158,26 @@ class SimulationRunner:
             start_date: Start date (YYYY-MM-DD)
             end_date: End date (YYYY-MM-DD)
             replay_config: Replay configuration (optional)
+            multi_oco_config: Multiple OCO brackets to test simultaneously (optional)
             **kwargs: Additional parameters to override in strategy_config
             
         Returns:
             SimulationResult with complete metrics and trade history
+            
+        Example with Multi-OCO:
+            # Test 3 different targets on same trigger
+            multi_oco = MultiOCOConfig.create_tight_medium_wide(
+                direction="LONG",
+                entry_offset=0.25
+            )
+            
+            result = SimulationRunner.run(
+                strategy_id="opening_range",
+                model_path="model.pt",
+                start_date="2025-03-01",
+                end_date="2025-03-15",
+                multi_oco_config=multi_oco
+            )
         """
         # Validate inputs
         if not model_path:
@@ -190,11 +218,13 @@ class SimulationRunner:
         # 4. Model performs inference
         # 5. Trades executed based on model output
         # 6. Results collected
+        # 7. If multi_oco_config provided, test multiple OCO brackets simultaneously
         
         run_result = SimulationRunner._execute_simulation(
             exp_config=exp_config,
             model_path=model_path,
-            strategy_config=strategy_config
+            strategy_config=strategy_config,
+            multi_oco_config=multi_oco_config
         )
         
         return run_result
@@ -203,7 +233,8 @@ class SimulationRunner:
     def _execute_simulation(
         exp_config: ExperimentConfig,
         model_path: str,
-        strategy_config: StrategyConfig
+        strategy_config: StrategyConfig,
+        multi_oco_config: Optional[MultiOCOConfig] = None
     ) -> SimulationResult:
         """
         Internal method to execute simulation.
@@ -225,7 +256,8 @@ class SimulationRunner:
         # - Call model.predict() for each trigger
         # - Execute trades based on model decision
         # - Track all decisions and trades
-        result = run_experiment(exp_config, model=model)
+        # - If multi_oco_config provided, test multiple OCO brackets per trigger
+        result = run_experiment(exp_config, model=model, multi_oco_config=multi_oco_config)
         
         # Extract metrics and trades
         trades = result.get('trades', [])
@@ -267,6 +299,16 @@ class SimulationRunner:
         else:
             sharpe_ratio = 0
         
+        # Extract multi-OCO results if present
+        multi_oco_results = result.get('multi_oco_results', [])
+        best_oco_config = None
+        
+        if multi_oco_results and multi_oco_config:
+            # Analyze which OCO config performed best
+            from src.sim.multi_oco import MultiOCOHelper
+            analysis = MultiOCOHelper.analyze_grid_performance(multi_oco_results)
+            best_oco_config = analysis.get('best_by_total_pnl')
+        
         return SimulationResult(
             run_id=result.get('run_id', 'sim_' + exp_config.name),
             strategy_config=strategy_config.to_dict() if hasattr(strategy_config, 'to_dict') else {},
@@ -284,6 +326,8 @@ class SimulationRunner:
             decisions=decisions,
             model_role=ModelRole.REPLAY_ONLY.value,
             inference_count=len(decisions),
+            multi_oco_results=multi_oco_results,
+            best_oco_config=best_oco_config,
         )
     
     @staticmethod

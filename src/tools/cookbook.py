@@ -399,6 +399,115 @@ Keep what works, discard what doesn't!
 """
     
     @staticmethod
+    def recipe_multi_oco_testing() -> str:
+        """Recipe: Test multiple OCO brackets simultaneously."""
+        return """
+RECIPE: Multi-OCO Testing
+=========================
+
+Goal: Test multiple risk/reward combinations on same trade trigger with limit entries.
+
+Why: Compare different targets/stops to find optimal bracket configuration.
+
+Steps:
+------
+
+1. Import tools:
+   ```python
+   from src.tools import StrategyBuilder, SimulationRunner
+   from src.sim.multi_oco import MultiOCOConfig
+   ```
+
+2. Create multi-OCO grid (Option A - Pre-built):
+   ```python
+   # Test 3 targets: 1R, 1.5R, 2R on same trigger
+   multi_oco = MultiOCOConfig.create_tight_medium_wide(
+       direction="LONG",
+       entry_offset=0.25  # Limit order 0.25 ATR from trigger
+   )
+   ```
+
+3. Or create custom grid (Option B):
+   ```python
+   # Test different entry offsets AND targets
+   multi_oco = MultiOCOConfig.create_standard_grid(
+       direction="LONG",
+       base_stop_atr=1.0,
+       tp_multiples=[1.0, 1.5, 2.0, 2.5],  # 4 different targets
+       entry_offsets=[0.1, 0.25, 0.5]      # 3 different entry levels
+   )
+   # This creates 4×3 = 12 OCO brackets!
+   ```
+
+4. Build strategy with multi-OCO:
+   ```python
+   strategy = StrategyBuilder.from_template(
+       "opening_range",
+       start_date="2025-03-01",
+       end_date="2025-03-15"
+   )
+   ```
+
+5. Run simulation:
+   ```python
+   result = SimulationRunner.run(
+       strategy_config=strategy,
+       model_path="path/to/model.pt",
+       start_date="2025-03-01",
+       end_date="2025-03-15",
+       multi_oco_config=multi_oco  # Add multi-OCO config
+   )
+   ```
+
+6. Analyze results:
+   ```python
+   print(result.summary())
+   
+   # Shows:
+   # - Total trades per OCO config
+   # - Fill rates (which entries get filled)
+   # - Win rates per config
+   # - Best performing OCO
+   
+   print(f"\\nBest OCO Configuration: {result.best_oco_config}")
+   
+   # Detailed analysis
+   from src.sim.multi_oco import MultiOCOHelper
+   
+   if result.multi_oco_results:
+       analysis = MultiOCOHelper.analyze_grid_performance(result.multi_oco_results)
+       MultiOCOHelper.print_analysis(analysis)
+   ```
+
+Benefits:
+---------
+- Test multiple configurations in ONE backtest
+- See which targets/stops work best
+- Compare entry offsets (limit order distances)
+- Find optimal risk/reward
+- Understand fill rates for different entry levels
+
+Example Output:
+---------------
+Multi-OCO Grid Result: tight_medium_wide
+============================================================
+Total OCOs: 3
+Filled: 3 (100%)
+Winners: 2
+Losers: 1
+Total PnL: $45.00
+Best OCO: medium_1.5R
+
+Individual OCO Results:
+------------------------------------------------------------
+  ✓ tight_1R               PnL: $10.00   Status: CLOSED_TP
+  ✓ medium_1.5R            PnL: $25.00   Status: CLOSED_TP
+  ✓ wide_2R                PnL: $10.00   Status: CLOSED_SL
+
+Finding: Medium target (1.5R) is optimal!
+"""
+    
+    @staticmethod
     def recipe_validate_before_deploy() -> str:
         """Recipe: Validate strategy before deploying."""
         return """
@@ -490,6 +599,7 @@ Better safe than sorry!
             "composite_trigger",
             "compare_models",
             "iterative_refinement",
+            "multi_oco_testing",
             "validate_before_deploy",
         ]
     
@@ -503,6 +613,7 @@ Better safe than sorry!
             "composite_trigger": AgentCookbook.recipe_composite_trigger,
             "compare_models": AgentCookbook.recipe_compare_models,
             "iterative_refinement": AgentCookbook.recipe_iterative_refinement,
+            "multi_oco_testing": AgentCookbook.recipe_multi_oco_testing,
             "validate_before_deploy": AgentCookbook.recipe_validate_before_deploy,
         }
         
@@ -524,10 +635,11 @@ Better safe than sorry!
         print("  4. composite_trigger - Build complex conditions")
         print("  5. compare_models - Test multiple models")
         print("  6. iterative_refinement - Systematically improve")
-        print("  7. validate_before_deploy - Pre-deployment checklist")
+        print("  7. multi_oco_testing - Test multiple OCO brackets with limits")
+        print("  8. validate_before_deploy - Pre-deployment checklist")
         print("\nUsage:")
         print("  from src.tools.cookbook import AgentCookbook")
-        print("  print(AgentCookbook.get_recipe('quick_start'))")
+        print("  print(AgentCookbook.get_recipe('multi_oco_testing'))")
         print("=" * 60 + "\n")
 
 

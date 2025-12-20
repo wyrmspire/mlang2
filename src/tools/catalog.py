@@ -380,11 +380,27 @@ class ToolCatalog:
                     'strategy_config': {'type': 'dict', 'description': 'Strategy configuration', 'required': True},
                     'model_path': {'type': 'str', 'description': 'Path to trained model for inference', 'required': True},
                     'data_range': {'type': 'dict', 'description': 'Start/end dates', 'required': True},
+                    'multi_oco_config': {'type': 'dict', 'description': 'Multiple OCO brackets to test', 'required': False},
                 },
                 'examples': [
                     'SimulationRunner.run(strategy_config={...}, model_path="model.pt", data_range={...})',
                 ],
-                'related_tools': ['strategy_builder', 'fusion_cnn'],
+                'related_tools': ['strategy_builder', 'fusion_cnn', 'multi_oco_grid'],
+            },
+            {
+                'tool_id': 'multi_oco_grid',
+                'name': 'Multi-OCO Grid',
+                'description': 'Test multiple OCO brackets simultaneously with limit order entries.',
+                'parameters': {
+                    'direction': {'type': 'str', 'description': 'LONG or SHORT', 'default': 'LONG'},
+                    'tp_multiples': {'type': 'list[float]', 'description': 'Target profit multiples', 'default': [1.0, 1.5, 2.0]},
+                    'entry_offsets': {'type': 'list[float]', 'description': 'Limit entry offsets in ATR', 'default': [0.25]},
+                },
+                'examples': [
+                    'MultiOCOConfig.create_tight_medium_wide(direction="LONG", entry_offset=0.25)',
+                    'MultiOCOConfig.create_standard_grid(tp_multiples=[1.0, 1.5, 2.0], entry_offsets=[0.1, 0.25])',
+                ],
+                'related_tools': ['simulation_runner', 'atr_bracket'],
             },
         ]
         
