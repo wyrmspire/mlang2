@@ -6,14 +6,12 @@ import { Navigator } from './components/Navigator';
 import { CandleChart } from './components/CandleChart';
 import { DetailsPanel } from './components/DetailsPanel';
 import { ChatAgent } from './components/ChatAgent';
-import { ReplayControls } from './components/ReplayControls';
 import { SimulationView } from './components/SimulationView';
 const App: React.FC = () => {
   const [currentRun, setCurrentRun] = useState<string>('');
   const [mode, setMode] = useState<'DECISION' | 'TRADE'>('DECISION');
   const [index, setIndex] = useState<number>(0);
   const [showRawData, setShowRawData] = useState<boolean>(false);
-  const [isReplaying, setIsReplaying] = useState<boolean>(false);
   const [showSimulation, setShowSimulation] = useState<boolean>(false);
 
   // Continuous contract data (loaded once)
@@ -108,14 +106,7 @@ const App: React.FC = () => {
           console.error('Failed to run strategy:', e);
         }
         break;
-      case 'START_REPLAY':
-        // Trigger replay via the ReplayControls component
-        // For now, log and set replaying state
-        console.log('Agent requested replay:', action.payload);
-        setIsReplaying(true);
-        // The ReplayControls component will handle the actual replay
-        // Could dispatch to it via state or context in future
-        break;
+
       default:
         console.warn('Unknown action:', action);
     }
@@ -149,16 +140,7 @@ const App: React.FC = () => {
           maxIndex={Math.max(0, maxIndex)}
         />
 
-        {/* REPLAY CONTROLS */}
-        <div className="p-2">
-          <ReplayControls
-            maxIndex={maxIndex}
-            currentIndex={index}
-            onIndexChange={setIndex}
-            onReplayStart={() => setIsReplaying(true)}
-            onReplayEnd={() => setIsReplaying(false)}
-          />
-        </div>
+
 
         <div className="flex-1 overflow-auto p-2">
           {continuousLoading ? (
