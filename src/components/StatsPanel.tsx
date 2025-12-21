@@ -50,10 +50,23 @@ export const StatsPanel: React.FC<StatsPanelProps> = ({
         let totalLossAmount = 0;
 
         decisions.forEach(d => {
-            // Get PnL from oco_results or cf_pnl_dollars
+            // Get PnL from oco_results (multiple formats) or cf_pnl_dollars
             const ocoResults = d.oco_results || {};
-            const bestOco = Object.values(ocoResults)[0] as { pnl_dollars?: number } | undefined;
-            const pnl = bestOco?.pnl_dollars ?? d.cf_pnl_dollars ?? 0;
+            let pnl = 0;
+
+            // Format 1: Direct pnl_dollars on oco_results (from IFVG debug scanner)
+            if (typeof ocoResults.pnl_dollars === 'number') {
+                pnl = ocoResults.pnl_dollars;
+            }
+            // Format 2: Nested OCO results (from OR scanner)
+            else if (typeof Object.values(ocoResults)[0] === 'object') {
+                const bestOco = Object.values(ocoResults)[0] as { pnl_dollars?: number } | undefined;
+                pnl = bestOco?.pnl_dollars ?? 0;
+            }
+            // Fallback: cf_pnl_dollars
+            else {
+                pnl = d.cf_pnl_dollars ?? 0;
+            }
 
             balance += pnl;
 

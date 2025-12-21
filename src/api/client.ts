@@ -148,7 +148,7 @@ export const api = {
         return response.json();
     },
 
-    startReplay: async (modelPath: string, startDate?: string, days: number = 1, speed: number = 10.0, threshold: number = 0.6): Promise<any> => {
+    startReplay: async (modelPath: string, startDate?: string, days: number = 1, speed: number = 10.0, threshold: number = 0.6, strategy: string = "ifvg_4class"): Promise<any> => {
         const hasBackend = await checkBackend();
         if (!hasBackend) throw new Error('Backend unavailable');
 
@@ -160,7 +160,8 @@ export const api = {
                 start_date: startDate,
                 days: days,
                 speed: speed,
-                threshold: threshold
+                threshold: threshold,
+                strategy: strategy
             })
         });
 

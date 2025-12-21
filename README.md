@@ -18,3 +18,17 @@ View your app in AI Studio: https://ai.studio/apps/drive/1Bbzo9SqLkyvQz-OvmsXntg
 2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
 3. Run the app:
    `npm run dev`
+
+## Data Availability
+
+**Continuous Contract Data (MES):**
+- **Date Range:** March 18, 2025 - September 17, 2025
+- **Timeframe:** 1-minute bars
+- **Records:** 179,587 bars
+- **Source:** `data/raw/continuous_contract.json`
+
+For strategy testing, use dates within this range. Example:
+```bash
+python scripts/run_ict_fvg.py --start-date 2025-03-18 --weeks 4
+```
+

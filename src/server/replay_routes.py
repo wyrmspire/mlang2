@@ -27,6 +27,7 @@ class ReplayStartRequest(BaseModel):
     days: int = 1
     speed: float = 10.0
     threshold: float = 0.6
+    strategy: str = "default"  # "default" or "ifvg"
 
 
 class ReplayControlRequest(BaseModel):
@@ -44,15 +45,40 @@ async def start_replay(request: ReplayStartRequest) -> Dict[str, Any]:
     """
     session_id = str(uuid.uuid4())[:8]
     
-    # Build command
-    cmd = [
-        "python", "scripts/run_replay.py",
-        "--model", request.model_path,
-        "--start-date", request.start_date,
-        "--days", str(request.days),
-        "--speed", str(request.speed),
-        "--threshold", str(request.threshold),
-    ]
+    # Select replay script based on strategy
+    if request.strategy == "ifvg_4class":
+        script = "scripts/run_ifvg_simulation.py"
+        model = request.model_path if request.model_path != "models/best_model.pth" else "models/ifvg_4class_cnn.pth"
+        cmd = [
+            "python", script,
+            "--model", model,
+            "--start-date", request.start_date,
+            "--days", str(request.days),
+            "--speed", str(request.speed),
+            "--min-quality", str(request.threshold),
+        ]
+    elif request.strategy == "ifvg":
+        script = "scripts/run_ifvg_replay.py"
+        model = request.model_path if request.model_path != "models/best_model.pth" else "models/ifvg_cnn.pth"
+        cmd = [
+            "python", script,
+            "--model", model,
+            "--start-date", request.start_date,
+            "--days", str(request.days),
+            "--speed", str(request.speed),
+            "--threshold", str(request.threshold),
+        ]
+    else:
+        script = "scripts/run_replay.py"
+        model = request.model_path
+        cmd = [
+            "python", script,
+            "--model", model,
+            "--start-date", request.start_date,
+            "--days", str(request.days),
+            "--speed", str(request.speed),
+            "--threshold", str(request.threshold),
+        ]
     
     # Start subprocess with proper environment
     try:

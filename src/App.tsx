@@ -186,7 +186,7 @@ const App: React.FC = () => {
       </div>
 
       {/* MAIN CONTENT */}
-      <div className="flex-1 flex flex-col">
+      <div className="flex-1 flex flex-col min-w-0">
 
         {/* STATS PANEL - Shows scan results: P&L, win rate, drawdown etc. */}
         <StatsPanel decisions={decisions} startingBalance={50000} />
@@ -218,7 +218,7 @@ const App: React.FC = () => {
         </div>
 
         {/* RAW DATA PANEL or DETAILS PANEL */}
-        <div className="h-72 border-t border-slate-700 bg-slate-800 overflow-auto">
+        <div className="h-48 border-t border-slate-700 bg-slate-800 overflow-auto flex-shrink-0">
           {showRawData ? (
             <div className="p-4">
               <h3 className="text-xs font-bold text-slate-400 uppercase mb-2">Raw Decision Data</h3>

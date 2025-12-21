@@ -24,30 +24,49 @@ interface CandleChartProps {
 type Timeframe = '1m' | '5m' | '15m' | '1h' | '4h';
 
 
-// Aggregation helper for higher timeframes
-const aggregateData = (bars: BarData[], interval: number): BarData[] => {
-    if (interval === 1) return bars;
+// Aggregation helper for higher timeframes - aligned to time boundaries
+const aggregateData = (bars: BarData[], intervalMinutes: number): BarData[] => {
+    if (intervalMinutes === 1) return bars;
+    if (bars.length === 0) return [];
 
     const aggregated: BarData[] = [];
+    const intervalMs = intervalMinutes * 60 * 1000;
 
-    for (let i = 0; i < bars.length; i += interval) {
-        const chunk = bars.slice(i, i + interval);
-        if (chunk.length === 0) continue;
+    // Group bars by aligned time bucket
+    const buckets = new Map<number, BarData[]>();
 
-        const open = chunk[0].open;
-        const close = chunk[chunk.length - 1].close;
+    bars.forEach(bar => {
+        const barTime = new Date(bar.time).getTime();
+        // Align to interval boundary (floor to nearest interval)
+        const bucketTime = Math.floor(barTime / intervalMs) * intervalMs;
+
+        if (!buckets.has(bucketTime)) {
+            buckets.set(bucketTime, []);
+        }
+        buckets.get(bucketTime)!.push(bar);
+    });
+
+    // Convert buckets to aggregated bars
+    const sortedBuckets = Array.from(buckets.entries()).sort((a, b) => a[0] - b[0]);
+
+    for (const [bucketTime, barsInBucket] of sortedBuckets) {
+        if (barsInBucket.length === 0) continue;
+
+        const open = barsInBucket[0].open;
+        const close = barsInBucket[barsInBucket.length - 1].close;
         let high = -Infinity;
         let low = Infinity;
         let vol = 0;
 
-        chunk.forEach(c => {
+        barsInBucket.forEach(c => {
             if (c.high > high) high = c.high;
             if (c.low < low) low = c.low;
             vol += c.volume;
         });
 
+        // Use the first bar's time string (it has the correct local part we want)
         aggregated.push({
-            time: chunk[0].time,
+            time: barsInBucket[0].time,
             open,
             high,
             low,
@@ -58,9 +77,22 @@ const aggregateData = (bars: BarData[], interval: number): BarData[] => {
     return aggregated;
 };
 
-// Parse ISO time string to Unix timestamp
+// Parse ISO time string to Unix timestamp forcing component display
+// This treats the HR:MIN:SEC in the string as if it were UTC to force display
 const parseTime = (timeStr: string): number => {
-    return Math.floor(new Date(timeStr).getTime() / 1000);
+    if (!timeStr) return 0;
+    // Match YYYY-MM-DD (T or space) HH:MM:SS
+    const m = timeStr.match(/(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2}):(\d{2})/);
+    if (!m) return Math.floor(new Date(timeStr).getTime() / 1000);
+
+    return Math.floor(Date.UTC(
+        parseInt(m[1]),
+        parseInt(m[2]) - 1,
+        parseInt(m[3]),
+        parseInt(m[4]),
+        parseInt(m[5]),
+        parseInt(m[6])
+    ) / 1000);
 };
 
 // Find bar index by timestamp
@@ -70,7 +102,7 @@ const findBarIndex = (bars: BarData[], timestamp: string): number => {
         const barTime = parseTime(bars[i].time);
         if (barTime >= targetTime) return i;
     }
-    return bars.length - 1;
+    return Math.max(0, bars.length - 1);
 };
 
 export const CandleChart: React.FC<CandleChartProps> = ({

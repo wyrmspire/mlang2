@@ -215,11 +215,91 @@ class FixedBracket(Bracket):
         )
 
 
+class ICTBracket(Bracket):
+    """
+    ICT-style bracket with PDH/PDL targeting.
+    
+    Uses pre-computed stop from scanner context (wick-based).
+    Targets PDH/PDL if R:R is favorable, otherwise uses min_rr.
+    
+    Agent config:
+        {"type": "ict", "min_rr": 1.5, "use_pdh_pdl": true}
+    """
+    
+    def __init__(self, min_rr: float = 1.5, use_pdh_pdl: bool = True):
+        self._min_rr = min_rr
+        self._use_pdh_pdl = use_pdh_pdl
+    
+    @property
+    def bracket_type(self) -> BracketType:
+        return BracketType.LEVEL
+    
+    @property
+    def params(self) -> Dict[str, Any]:
+        return {
+            "min_rr": self._min_rr,
+            "use_pdh_pdl": self._use_pdh_pdl,
+        }
+    
+    def compute(
+        self,
+        entry_price: float,
+        direction: str,
+        atr: float,
+        stop_price: float = None,  # Pre-computed from scanner
+        pdh: float = None,
+        pdl: float = None,
+        **kwargs
+    ) -> BracketLevels:
+        """
+        Compute ICT bracket levels.
+        
+        Stop is expected from scanner context (at penetrating wick).
+        TP targets PDH/PDL if favorable R:R, else min_rr.
+        """
+        # Use pre-computed stop if provided, otherwise fallback to ATR
+        if stop_price is not None:
+            computed_stop = stop_price
+        else:
+            # Fallback if no pre-computed stop
+            if direction.upper() == "LONG":
+                computed_stop = entry_price - (2.0 * atr)
+            else:
+                computed_stop = entry_price + (2.0 * atr)
+        
+        risk_points = abs(entry_price - computed_stop)
+        min_reward = self._min_rr * risk_points
+        
+        if direction.upper() == "LONG":
+            # Target PDH if favorable
+            if self._use_pdh_pdl and pdh and (pdh - entry_price) >= min_reward:
+                tp_price = pdh
+            else:
+                tp_price = entry_price + min_reward
+        else:
+            # Target PDL if favorable
+            if self._use_pdh_pdl and pdl and (entry_price - pdl) >= min_reward:
+                tp_price = pdl
+            else:
+                tp_price = entry_price - min_reward
+        
+        reward_points = abs(tp_price - entry_price)
+        
+        return BracketLevels(
+            stop_price=computed_stop,
+            tp_price=tp_price,
+            risk_points=risk_points,
+            reward_points=reward_points,
+            r_multiple=reward_points / risk_points if risk_points > 0 else 0
+        )
+
+
 # Registry and factory
 BRACKET_REGISTRY = {
     "atr": ATRBracket,
     "percent": PercentBracket,
     "fixed": FixedBracket,
+    "ict": ICTBracket,
 }
 
 

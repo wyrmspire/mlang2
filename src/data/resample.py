@@ -21,7 +21,7 @@ class MTFConfig:
     """Multi-timeframe configuration."""
     base_tf: str = "1min"
     higher_tfs: tuple = ("5min", "15min", "1h", "4h")
-    resample_rule: ResampleRule = ResampleRule.RIGHT_CLOSED
+    resample_rule: ResampleRule = ResampleRule.LEFT_CLOSED
 
 
 # Map user-friendly names to pandas offset strings

@@ -131,7 +131,7 @@ export const SimulationView: React.FC<SimulationViewProps> = ({
             const replaySpeed = 10000; // Super fast
             const threshold = 0.2; // Low threshold for debugging/visibility
 
-            const session = await api.startReplay("models/swing_breakout_model.pth", startDate, 7, replaySpeed, threshold);
+            const session = await api.startReplay("models/ifvg_4class_cnn.pth", startDate, 7, replaySpeed, threshold);
             const url = api.getReplayStreamUrl(session.session_id);
 
             // Consume Stream
@@ -299,17 +299,17 @@ export const SimulationView: React.FC<SimulationViewProps> = ({
                 }
 
                 if (decision && decision.triggered) {
-                    // Use model values
+                    // Use actual OCO levels from simulation if provided
                     const entry = decision.price;
                     const atr = decision.atr || (entry * 0.001);
-                    const stop = entry - (2 * atr); // Default 2 ATR
-                    const tp = entry + (4 * atr);   // Default 4 ATR
+                    const stop = decision.stop_price ?? (entry - (2 * atr));
+                    const tp = decision.tp_price ?? (entry + (4 * atr));
 
                     const newOco = { entry, stop, tp, startTime: bar.time };
                     ocoRef.current = newOco;
                     setOcoState(newOco);
                     setTriggers(prev => prev + 1);
-                    console.log('MODEL TRIGGER:', newOco, 'Prob:', decision.win_probability);
+                    console.log('MODEL TRIGGER:', newOco, 'Prob:', decision.win_probability, 'Dir:', decision.direction);
                 }
             }
 
@@ -337,7 +337,7 @@ export const SimulationView: React.FC<SimulationViewProps> = ({
             <div className="h-14 bg-slate-800 border-b border-slate-700 flex items-center justify-between px-4">
                 <h1 className="text-white font-bold">Model Replay (Prefetch)</h1>
                 <div className="flex items-center space-x-4">
-                    <span className="text-sm text-slate-400">Model: swing_breakout_model.pth</span>
+                    <span className="text-sm text-slate-400">Model: ifvg_4class_cnn.pth</span>
                     <button onClick={onClose} className="text-slate-400 hover:text-white">✕ Close</button>
                 </div>
             </div>
