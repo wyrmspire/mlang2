@@ -13,6 +13,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 import pandas as pd
 import uuid
+from datetime import datetime, timedelta
 
 from src.sim.engine import SimulationEngine
 from src.data.loader import load_continuous_contract
@@ -20,7 +21,20 @@ from src.data.loader import load_continuous_contract
 router = APIRouter(prefix="/sim", tags=["simulation"])
 
 # Active simulation sessions (in-memory)
-_sessions: Dict[str, SimulationEngine] = {}
+# NOTE: In production, use Redis or similar for session storage with TTL
+_sessions: Dict[str, tuple[SimulationEngine, datetime]] = {}
+_SESSION_TTL_HOURS = 24  # Sessions auto-expire after 24 hours
+
+
+def cleanup_expired_sessions():
+    """Remove expired sessions to prevent memory leaks."""
+    now = datetime.now()
+    expired = [
+        sid for sid, (_, created_at) in _sessions.items()
+        if now - created_at > timedelta(hours=_SESSION_TTL_HOURS)
+    ]
+    for sid in expired:
+        del _sessions[sid]
 
 
 # =============================================================================
@@ -112,9 +126,14 @@ async def start_simulation(request: SimStartRequest) -> Dict[str, Any]:
             end_idx=end_idx
         )
         
-        # Generate session ID
-        session_id = str(uuid.uuid4())[:8]
-        _sessions[session_id] = engine
+        # Generate session ID - use full UUID for uniqueness
+        session_id = str(uuid.uuid4())
+        
+        # Cleanup old sessions before adding new one
+        cleanup_expired_sessions()
+        
+        # Store engine with creation timestamp
+        _sessions[session_id] = (engine, datetime.now())
         
         return {
             "session_id": session_id,
@@ -146,7 +165,7 @@ async def step_simulation(session_id: str, request: SimStepRequest) -> Dict[str,
     if session_id not in _sessions:
         raise HTTPException(404, f"Session {session_id} not found")
     
-    engine = _sessions[session_id]
+    engine, _ = _sessions[session_id]
     
     results = []
     all_events = []
@@ -191,7 +210,7 @@ async def update_params(session_id: str, request: SimUpdateParamsRequest) -> Dic
     if session_id not in _sessions:
         raise HTTPException(404, f"Session {session_id} not found")
     
-    engine = _sessions[session_id]
+    engine, _ = _sessions[session_id]
     engine.update_params(request.params)
     
     return {
@@ -207,7 +226,7 @@ async def get_state(session_id: str) -> Dict[str, Any]:
     if session_id not in _sessions:
         raise HTTPException(404, f"Session {session_id} not found")
     
-    engine = _sessions[session_id]
+    engine, _ = _sessions[session_id]
     return engine.get_state()
 
 
@@ -217,7 +236,7 @@ async def stop_simulation(session_id: str) -> Dict[str, Any]:
     if session_id not in _sessions:
         raise HTTPException(404, f"Session {session_id} not found")
     
-    engine = _sessions[session_id]
+    engine, _ = _sessions[session_id]
     final_state = engine.get_state()
     
     # Remove session
@@ -233,15 +252,18 @@ async def stop_simulation(session_id: str) -> Dict[str, Any]:
 @router.get("/sessions")
 async def list_sessions() -> Dict[str, Any]:
     """List all active simulation sessions."""
+    cleanup_expired_sessions()  # Cleanup before listing
+    
     return {
         "sessions": [
             {
                 "session_id": sid,
                 "strategy": engine.strategy.strategy_name,
                 "progress": engine.stream.progress,
-                "stats": engine.get_state().get('stats', {})
+                "stats": engine.get_state().get('stats', {}),
+                "created_at": created_at.isoformat()
             }
-            for sid, engine in _sessions.items()
+            for sid, (engine, created_at) in _sessions.items()
         ]
     }
 

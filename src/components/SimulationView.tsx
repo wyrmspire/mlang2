@@ -101,7 +101,9 @@ export const SimulationView: React.FC<SimulationViewProps> = ({
             }
             if (sessionId) {
                 // Stop session on unmount
-                api.stopSimulation(sessionId).catch(() => {});
+                api.stopSimulation(sessionId).catch((error) => {
+                    console.warn('Failed to cleanup simulation session:', error);
+                });
             }
         };
     }, [sessionId]);

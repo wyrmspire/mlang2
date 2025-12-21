@@ -132,12 +132,13 @@ class StrategyRunner:
                 setup_detected=True
             )
         elif self.strategy_name == "random":
-            # Random strategy for testing
+            # Random strategy for testing - use seeded RNG for reproducibility
             import random
+            rng = random.Random(42)  # Seeded for reproducible behavior
             self.model = lambda bar, history: StrategySignal(
-                direction='LONG' if random.random() > 0.5 else None,
-                confidence=random.random(),
-                setup_detected=random.random() > 0.8
+                direction='LONG' if rng.random() > 0.5 else None,
+                confidence=rng.random(),
+                setup_detected=rng.random() > 0.8
             )
         else:
             # Default: no signals
@@ -591,10 +592,10 @@ class SimulationEngine:
                 return float(history['high'].iloc[-1] - history['low'].iloc[-1])
             return 10.0  # Default fallback
         
-        # True Range
+        # True Range - fillna(0) handles first row with NaN from shift
         high_low = history['high'] - history['low']
-        high_close = abs(history['high'] - history['close'].shift(1))
-        low_close = abs(history['low'] - history['close'].shift(1))
+        high_close = abs(history['high'] - history['close'].shift(1)).fillna(0)
+        low_close = abs(history['low'] - history['close'].shift(1)).fillna(0)
         
         true_range = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
         atr = true_range.rolling(window=window).mean().iloc[-1]
