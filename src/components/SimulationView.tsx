@@ -1,247 +1,217 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { CandleChart } from './CandleChart';
-import { VizTrade, VizDecision, VizOCO } from '../types/viz';
+import { VizTrade, VizDecision } from '../types/viz';
+import { api } from '../api/client';
 
 interface SimulationViewProps {
     onClose: () => void;
     runId?: string;
-    lastTradeTimestamp?: string; // ISO timestamp of last trade in strategy
+    lastTradeTimestamp?: string;
 }
 
 interface BarData {
-    time: number;
+    time: string;
     open: number;
     high: number;
     low: number;
     close: number;
+    volume?: number;
+}
+
+interface PendingOrder {
+    order_id: string;
+    type: string;
+    direction: string;
+    price: number;
+    status: string;
+}
+
+interface ActiveOCO {
+    name: string;
+    entry_price: number;
+    stop_price: number;
+    tp_price: number;
+    status: string;
 }
 
 /**
- * Simulation View - Full forward simulation page
+ * Simulation View 2.0 - Interactive Trading Lab
  * 
- * Loads data starting from AFTER the strategy's last trade,
- * runs model bar-by-bar, shows OCO when triggered.
+ * Backend-owned simulation using the new /sim/* API.
+ * The backend runs the full market simulation (OMS), frontend displays state.
+ * 
+ * Architecture:
+ * - Backend: Runs DataStream, Strategy, and OMS
+ * - Frontend: Controls + Visualization
+ * 
+ * Features:
+ * - Strategy selection and configuration
+ * - Play/Pause/Step controls
+ * - Live event log showing OMS activity
+ * - Chart rendering with pending orders and active OCOs
+ * - Mid-stream parameter updates
  */
 export const SimulationView: React.FC<SimulationViewProps> = ({
     onClose,
     runId,
     lastTradeTimestamp
 }) => {
+    // Session state
+    const [sessionId, setSessionId] = useState<string | null>(null);
     const [isRunning, setIsRunning] = useState(false);
-    const [speed, setSpeed] = useState(200); // ms per bar
+    const [status, setStatus] = useState('Ready - Configure and start simulation');
+    
+    // Configuration
+    const [strategy, setStrategy] = useState('random');
+    const [entryType, setEntryType] = useState('MARKET');
+    const [stopAtr, setStopAtr] = useState(1.0);
+    const [tpMultiple, setTpMultiple] = useState(1.4);
+    const [speed, setSpeed] = useState(200); // ms per step
+    
+    // Visualization state
     const [bars, setBars] = useState<BarData[]>([]);
-    const [currentIndex, setCurrentIndex] = useState(0);
-    const [status, setStatus] = useState('Ready');
-    const [ocoState, setOcoState] = useState<{ entry: number, stop: number, tp: number, startTime: number } | null>(null);
-    const [triggers, setTriggers] = useState(0);
-    const [wins, setWins] = useState(0);
-    const [losses, setLosses] = useState(0);
-    const [startIndex, setStartIndex] = useState(0);
-
-    const intervalRef = useRef<NodeJS.Timeout | null>(null);
-    const allBarsRef = useRef<BarData[]>([]);
-    const ocoRef = useRef<{ entry: number, stop: number, tp: number, startTime: number } | null>(null);
-
-    // Load continuous contract data starting AFTER the last trade
-    useEffect(() => {
-        const loadData = async () => {
-            setStatus('Loading data...');
-            try {
-                // Try both ports
-                for (const port of [8000, 8001]) {
-                    try {
-                        // Build query params - if we have lastTradeTimestamp, start from there
-                        const params = new URLSearchParams();
-                        params.set('timeframe', '1m');
-
-                        // Use last trade timestamp - start 2 days BEFORE for context
-                        // This allows seeing the setup leading into where we start simulating
-                        if (lastTradeTimestamp) {
-                            const lastTradeDate = new Date(lastTradeTimestamp);
-                            // Start 2 days before the last trade for context
-                            const startDate = new Date(lastTradeDate.getTime() - 2 * 24 * 60 * 60 * 1000);
-                            // End 2 weeks after the last trade
-                            const endDate = new Date(lastTradeDate.getTime() + 14 * 24 * 60 * 60 * 1000);
-                            params.set('start', startDate.toISOString());
-                            params.set('end', endDate.toISOString());
-                        }
-
-                        const res = await fetch(`http://localhost:${port}/market/continuous?${params}`);
-                        if (res.ok) {
-                            const data = await res.json();
-                            // Convert to our format
-                            const loadedBars: BarData[] = data.bars.map((b: any) => ({
-                                time: new Date(b.time).getTime() / 1000,
-                                open: b.open,
-                                high: b.high,
-                                low: b.low,
-                                close: b.close,
-                            }));
-
-                            allBarsRef.current = loadedBars;
-
-                            // Find the bar closest to lastTradeTimestamp to start playback there
-                            // The 2 days before show as pre-existing context
-                            let simStartIdx = 0;
-                            if (lastTradeTimestamp) {
-                                const lastTradeTime = new Date(lastTradeTimestamp).getTime() / 1000;
-                                simStartIdx = loadedBars.findIndex(b => b.time >= lastTradeTime);
-                                if (simStartIdx === -1) simStartIdx = 0;
-                            }
-                            setStartIndex(simStartIdx);
-
-                            if (loadedBars.length > 0) {
-                                const firstBar = new Date(loadedBars[0].time * 1000).toISOString();
-                                const lastBar = new Date(loadedBars[loadedBars.length - 1].time * 1000).toISOString();
-                                setStatus(`Loaded ${loadedBars.length} bars (${simStartIdx} pre-context): ${firstBar.slice(0, 10)} to ${lastBar.slice(0, 10)}`);
-                            } else {
-                                setStatus('No data available for this period');
-                            }
-
-                            console.log('Simulation data:', {
-                                startParam: lastTradeTimestamp,
-                                barsLoaded: loadedBars.length,
-                                simStartIdx,
-                                firstBar: loadedBars[0]?.time ? new Date(loadedBars[0].time * 1000).toISOString() : 'none',
-                                lastBar: loadedBars.length > 0 ? new Date(loadedBars[loadedBars.length - 1].time * 1000).toISOString() : 'none'
-                            });
-                            return;
-                        }
-                    } catch { }
-                }
-                setStatus('Failed to load data');
-            } catch (e) {
-                setStatus(`Error: ${e}`);
-            }
-        };
-        loadData();
-    }, [lastTradeTimestamp, runId]);
-
+    const [events, setEvents] = useState<string[]>([]);
+    const [pendingOrders, setPendingOrders] = useState<PendingOrder[]>([]);
+    const [activeOCOs, setActiveOCOs] = useState<ActiveOCO[]>([]);
     const [completedTrades, setCompletedTrades] = useState<VizTrade[]>([]);
     const [completedDecisions, setCompletedDecisions] = useState<VizDecision[]>([]);
-    const completedTradesRef = useRef<VizTrade[]>([]);
-    const completedDecisionsRef = useRef<VizDecision[]>([]);
-
-    // Start simulation
-    const startSimulation = useCallback(() => {
-        if (allBarsRef.current.length === 0) {
-            setStatus('No data loaded');
-            return;
+    
+    // Stats
+    const [progress, setProgress] = useState(0);
+    const [totalOCOs, setTotalOCOs] = useState(0);
+    const [activePositions, setActivePositions] = useState(0);
+    const [closedPositions, setClosedPositions] = useState(0);
+    
+    // Playback control
+    const intervalRef = useRef<NodeJS.Timeout | null>(null);
+    const eventLogRef = useRef<HTMLDivElement>(null);
+    
+    // Auto-scroll event log
+    useEffect(() => {
+        if (eventLogRef.current) {
+            eventLogRef.current.scrollTop = eventLogRef.current.scrollHeight;
         }
-
-        setIsRunning(true);
-
-        // Resume from current index if we're already part way through
-        let startIdx = startIndex;
-        if (currentIndex > startIndex && bars.length > 0) {
-            startIdx = currentIndex + 1;
-            setStatus(`Resuming from bar ${startIdx}...`);
-        } else {
-            // Reset if starting fresh
-            setCurrentIndex(startIndex);
+    }, [events]);
+    
+    // Cleanup on unmount
+    useEffect(() => {
+        return () => {
+            if (intervalRef.current) {
+                clearInterval(intervalRef.current);
+            }
+            if (sessionId) {
+                // Stop session on unmount
+                api.stopSimulation(sessionId).catch(() => {});
+            }
+        };
+    }, [sessionId]);
+    
+    // Start simulation
+    const startSimulation = useCallback(async () => {
+        try {
+            setStatus('Starting simulation...');
+            
+            // Determine start date (2 days before last trade for context, or default)
+            let startDate: string | undefined;
+            let endDate: string | undefined;
+            
+            if (lastTradeTimestamp) {
+                const lastTrade = new Date(lastTradeTimestamp);
+                const start = new Date(lastTrade.getTime() - 2 * 24 * 60 * 60 * 1000);
+                const end = new Date(lastTrade.getTime() + 14 * 24 * 60 * 60 * 1000);
+                startDate = start.toISOString().split('T')[0];
+                endDate = end.toISOString().split('T')[0];
+            }
+            
+            // Start backend session
+            const result = await api.startSimulation({
+                strategy_name: strategy,
+                config: {
+                    entry_type: entryType,
+                    stop_atr: stopAtr,
+                    tp_multiple: tpMultiple,
+                    auto_submit_ocos: true,
+                    direction: 'LONG'  // Default to LONG, strategy can override
+                },
+                start_date: startDate,
+                end_date: endDate
+            });
+            
+            setSessionId(result.session_id);
+            setStatus(`Session ${result.session_id} started - ${result.data_range.total_bars} bars`);
+            setIsRunning(true);
+            
+            // Clear previous state
             setBars([]);
-            setOcoState(null);
-            ocoRef.current = null;
-            setTriggers(0);
-            setWins(0);
-            setLosses(0);
+            setEvents([`Session started: ${result.session_id}`]);
             setCompletedTrades([]);
             setCompletedDecisions([]);
-            completedTradesRef.current = [];
-            completedDecisionsRef.current = [];
-            setStatus(`Running from bar ${startIndex}...`);
+            setPendingOrders([]);
+            setActiveOCOs([]);
+            setProgress(0);
+            
+            // Start playback loop
+            startPlayback(result.session_id);
+            
+        } catch (error) {
+            setStatus(`Error: ${error}`);
+            setIsRunning(false);
         }
-
-        // Add bars one at a time, starting from startIndex
-        let idx = startIdx;
-        intervalRef.current = setInterval(() => {
-            if (idx >= allBarsRef.current.length) {
+    }, [strategy, entryType, stopAtr, tpMultiple, lastTradeTimestamp]);
+    
+    // Playback loop
+    const startPlayback = useCallback((sessId: string) => {
+        intervalRef.current = setInterval(async () => {
+            try {
+                // Step forward 1 bar
+                const result = await api.stepSimulation(sessId, 1);
+                
+                if (result.done) {
+                    // Simulation complete
+                    stopSimulation();
+                    setStatus('Simulation completed');
+                    return;
+                }
+                
+                // Update bars
+                if (result.bars && result.bars.length > 0) {
+                    setBars(prev => [...prev, ...result.bars]);
+                }
+                
+                // Update events
+                if (result.events && result.events.length > 0) {
+                    setEvents(prev => [...prev, ...result.events]);
+                }
+                
+                // Update state
+                if (result.state) {
+                    const state = result.state;
+                    
+                    // Update OMS state
+                    if (state.oms) {
+                        setPendingOrders(state.oms.pending_orders || []);
+                        setActiveOCOs(state.oms.active_ocos || []);
+                        setActivePositions(state.oms.open_positions?.length || 0);
+                    }
+                    
+                    // Update stats
+                    if (state.stats) {
+                        setTotalOCOs(state.stats.total_ocos || 0);
+                        setClosedPositions(state.stats.closed_positions || 0);
+                    }
+                    
+                    // Update progress
+                    setProgress(state.progress || 0);
+                }
+                
+            } catch (error) {
+                console.error('Step error:', error);
                 stopSimulation();
-                setStatus('Completed');
-                return;
+                setStatus(`Error during playback: ${error}`);
             }
-
-            const bar = allBarsRef.current[idx];
-            setBars(prev => [...prev, bar]);
-            setCurrentIndex(idx);
-
-            // Check if OCO resolved FIRST (using ref for current state)
-            if (ocoRef.current) {
-                let outcome = '';
-                let price = 0;
-
-                if (bar.low <= ocoRef.current.stop) {
-                    // Stop hit - LOSS
-                    outcome = 'LOSS';
-                    price = ocoRef.current.stop; // Assume filled at stop
-                    setLosses(prev => prev + 1);
-                } else if (bar.high >= ocoRef.current.tp) {
-                    // TP hit - WIN
-                    outcome = 'WIN';
-                    price = ocoRef.current.tp;
-                    setWins(prev => prev + 1);
-                }
-
-                if (outcome) {
-                    // Create finished trade records for persistence
-                    const tradeId = `sim_trade_${ocoRef.current.startTime}`;
-                    const decisionId = `sim_dec_${ocoRef.current.startTime}`;
-
-                    const decision: VizDecision = {
-                        decision_id: decisionId,
-                        timestamp: new Date(ocoRef.current.startTime * 1000).toISOString(),
-                        bar_idx: 0, index: 0, scanner_id: 'sim', scanner_context: {},
-                        action: 'OCO', skip_reason: '', current_price: ocoRef.current.entry,
-                        atr: 0, cf_outcome: outcome, cf_pnl_dollars: 0,
-                        oco: {
-                            entry_price: ocoRef.current.entry,
-                            stop_price: ocoRef.current.stop,
-                            tp_price: ocoRef.current.tp,
-                            entry_type: 'MARKET', direction: 'LONG', reference_type: '',
-                            reference_value: 0, atr_at_creation: 0, max_bars: 100,
-                            stop_atr: 0, tp_multiple: 0
-                        }
-                    };
-
-                    const trade: VizTrade = {
-                        trade_id: tradeId, decision_id: decisionId, index: 0,
-                        direction: 'LONG', size: 1,
-                        entry_time: new Date(ocoRef.current.startTime * 1000).toISOString(),
-                        entry_bar: 0, entry_price: ocoRef.current.entry,
-                        exit_time: new Date(bar.time * 1000).toISOString(),
-                        exit_bar: 0, exit_price: price,
-                        exit_reason: outcome === 'WIN' ? 'TP' : 'SL',
-                        outcome: outcome, pnl_points: 0, pnl_dollars: 0,
-                        r_multiple: 0, bars_held: 0, mae: 0, mfe: 0, fills: []
-                    };
-
-                    completedDecisionsRef.current.push(decision);
-                    completedTradesRef.current.push(trade);
-                    setCompletedDecisions([...completedDecisionsRef.current]);
-                    setCompletedTrades([...completedTradesRef.current]);
-
-                    ocoRef.current = null;
-                    setOcoState(null);
-                }
-            }
-
-            // Simple trigger logic: random for demo, replace with actual model
-            // Only trigger if no active OCO
-            if (!ocoRef.current && Math.random() < 0.01) { // 1% chance per bar
-                const entry = bar.close;
-                const stop = entry - 5;
-                const tp = entry + 10;
-                const newOco = { entry, stop, tp, startTime: bar.time };
-                ocoRef.current = newOco;
-                setOcoState(newOco);
-                setTriggers(prev => prev + 1);
-                console.log('OCO TRIGGERED:', newOco);
-            }
-
-            idx++;
         }, speed);
-    }, [speed, startIndex]);
-
+    }, [speed]);
+    
     // Stop simulation
     const stopSimulation = useCallback(() => {
         if (intervalRef.current) {
@@ -249,23 +219,75 @@ export const SimulationView: React.FC<SimulationViewProps> = ({
             intervalRef.current = null;
         }
         setIsRunning(false);
-        setStatus('Stopped');
     }, []);
-
-    // Cleanup
-    useEffect(() => {
-        return () => {
-            if (intervalRef.current) {
-                clearInterval(intervalRef.current);
+    
+    // Step one bar manually
+    const stepOnce = useCallback(async () => {
+        if (!sessionId) return;
+        
+        try {
+            const result = await api.stepSimulation(sessionId, 1);
+            
+            if (result.done) {
+                setStatus('Simulation completed');
+                return;
             }
-        };
-    }, []);
-
+            
+            // Update bars
+            if (result.bars && result.bars.length > 0) {
+                setBars(prev => [...prev, ...result.bars]);
+            }
+            
+            // Update events
+            if (result.events && result.events.length > 0) {
+                setEvents(prev => [...prev, ...result.events]);
+            }
+            
+            // Update state
+            if (result.state) {
+                const state = result.state;
+                
+                if (state.oms) {
+                    setPendingOrders(state.oms.pending_orders || []);
+                    setActiveOCOs(state.oms.active_ocos || []);
+                    setActivePositions(state.oms.open_positions?.length || 0);
+                }
+                
+                if (state.stats) {
+                    setTotalOCOs(state.stats.total_ocos || 0);
+                    setClosedPositions(state.stats.closed_positions || 0);
+                }
+                
+                setProgress(state.progress || 0);
+            }
+            
+        } catch (error) {
+            setStatus(`Error: ${error}`);
+        }
+    }, [sessionId]);
+    
+    // Update parameters mid-stream
+    const updateParams = useCallback(async () => {
+        if (!sessionId) return;
+        
+        try {
+            await api.updateSimParams(sessionId, {
+                entry_type: entryType,
+                stop_atr: stopAtr,
+                tp_multiple: tpMultiple
+            });
+            
+            setEvents(prev => [...prev, `Parameters updated: ${entryType}, SL=${stopAtr}ATR, TP=${tpMultiple}x`]);
+        } catch (error) {
+            setStatus(`Error updating params: ${error}`);
+        }
+    }, [sessionId, entryType, stopAtr, tpMultiple]);
+    
     return (
         <div className="fixed inset-0 bg-slate-900 z-50 flex flex-col">
             {/* Header */}
             <div className="h-14 bg-slate-800 border-b border-slate-700 flex items-center justify-between px-4">
-                <h1 className="text-white font-bold">Forward Simulation</h1>
+                <h1 className="text-white font-bold">Interactive Simulation Lab</h1>
                 <button
                     onClick={onClose}
                     className="text-slate-400 hover:text-white"
@@ -276,42 +298,117 @@ export const SimulationView: React.FC<SimulationViewProps> = ({
 
             {/* Main content */}
             <div className="flex-1 flex">
-                {/* Chart - using real CandleChart */}
+                {/* Chart area */}
                 <div className="flex-1 flex flex-col min-h-0">
                     <div className="flex-1 min-h-[400px]">
                         <CandleChart
                             continuousData={bars.length > 0 ? {
                                 timeframe: '1m',
                                 count: bars.length,
-                                bars: bars.map(b => ({
-                                    time: new Date(b.time * 1000).toISOString(),
-                                    open: b.open,
-                                    high: b.high,
-                                    low: b.low,
-                                    close: b.close,
-                                    volume: 0
-                                }))
+                                bars: bars
                             } : null}
                             decisions={completedDecisions}
                             activeDecision={null}
                             trade={null}
                             trades={completedTrades}
-                            simulationOco={ocoState}
-                            forceShowAllTrades={true} /* Force show completed trades */
+                            simulationOco={activeOCOs.length > 0 ? {
+                                entry: activeOCOs[0].entry_price,
+                                stop: activeOCOs[0].stop_price,
+                                tp: activeOCOs[0].tp_price,
+                                startTime: 0  // Not used in rendering
+                            } : null}
+                            forceShowAllTrades={true}
                         />
                     </div>
-                    <div className="p-2 text-xs text-slate-400">
-                        Bars loaded: {bars.length} | Playing from bar: {currentIndex}
+                    
+                    {/* Event log */}
+                    <div className="h-32 bg-slate-950 border-t border-slate-700 p-2 overflow-y-auto font-mono text-xs"
+                         ref={eventLogRef}>
+                        {events.map((event, i) => (
+                            <div key={i} className="text-green-400 mb-1">
+                                {event}
+                            </div>
+                        ))}
                     </div>
                 </div>
 
                 {/* Controls sidebar */}
-                <div className="w-80 bg-slate-800 border-l border-slate-700 p-4">
+                <div className="w-80 bg-slate-800 border-l border-slate-700 p-4 overflow-y-auto">
                     <h2 className="text-sm font-bold text-blue-400 uppercase mb-4">Controls</h2>
+
+                    {/* Strategy */}
+                    <div className="mb-4">
+                        <label className="text-xs text-slate-400 block mb-1">Strategy</label>
+                        <select
+                            value={strategy}
+                            onChange={e => setStrategy(e.target.value)}
+                            disabled={isRunning}
+                            className="w-full bg-slate-900 border border-slate-600 rounded px-2 py-1 text-sm text-white"
+                        >
+                            <option value="random">Random (Test)</option>
+                            <option value="always_long">Always Long (Test)</option>
+                            <option value="ifvg_cnn">IFVG CNN (Future)</option>
+                        </select>
+                    </div>
+
+                    {/* Entry Type */}
+                    <div className="mb-4">
+                        <label className="text-xs text-slate-400 block mb-1">Entry Type</label>
+                        <select
+                            value={entryType}
+                            onChange={e => setEntryType(e.target.value)}
+                            className="w-full bg-slate-900 border border-slate-600 rounded px-2 py-1 text-sm text-white"
+                        >
+                            <option value="MARKET">Market</option>
+                            <option value="LIMIT">Limit</option>
+                        </select>
+                    </div>
+
+                    {/* Stop ATR */}
+                    <div className="mb-4">
+                        <label className="text-xs text-slate-400 block mb-1">
+                            Stop Loss (ATR): {stopAtr.toFixed(1)}
+                        </label>
+                        <input
+                            type="range"
+                            min="0.5"
+                            max="3.0"
+                            step="0.1"
+                            value={stopAtr}
+                            onChange={e => setStopAtr(parseFloat(e.target.value))}
+                            className="w-full"
+                        />
+                    </div>
+
+                    {/* TP Multiple */}
+                    <div className="mb-4">
+                        <label className="text-xs text-slate-400 block mb-1">
+                            Take Profit (Multiple): {tpMultiple.toFixed(1)}
+                        </label>
+                        <input
+                            type="range"
+                            min="1.0"
+                            max="3.0"
+                            step="0.1"
+                            value={tpMultiple}
+                            onChange={e => setTpMultiple(parseFloat(e.target.value))}
+                            className="w-full"
+                        />
+                    </div>
+
+                    {/* Update Params Button */}
+                    {sessionId && (
+                        <button
+                            onClick={updateParams}
+                            className="w-full bg-yellow-600 hover:bg-yellow-500 text-white font-bold py-2 px-4 rounded mb-4"
+                        >
+                            Update Parameters
+                        </button>
+                    )}
 
                     {/* Speed */}
                     <div className="mb-4">
-                        <label className="text-xs text-slate-400">Speed (ms per bar)</label>
+                        <label className="text-xs text-slate-400 block mb-1">Playback Speed</label>
                         <select
                             value={speed}
                             onChange={e => setSpeed(parseInt(e.target.value))}
@@ -322,62 +419,101 @@ export const SimulationView: React.FC<SimulationViewProps> = ({
                             <option value={200}>Normal (200ms)</option>
                             <option value={100}>Fast (100ms)</option>
                             <option value={50}>Very Fast (50ms)</option>
-                            <option value={10}>Max (10ms)</option>
                         </select>
                     </div>
 
-                    {/* Play/Stop */}
-                    <div className="mb-4">
-                        {!isRunning ? (
+                    <div className="border-t border-slate-700 pt-4 mb-4">
+                        {/* Play/Stop/Step */}
+                        {!sessionId ? (
                             <button
                                 onClick={startSimulation}
-                                className="w-full bg-green-600 hover:bg-green-500 text-white font-bold py-2 px-4 rounded"
+                                className="w-full bg-green-600 hover:bg-green-500 text-white font-bold py-2 px-4 rounded mb-2"
                             >
                                 ▶ Start Simulation
                             </button>
                         ) : (
-                            <button
-                                onClick={stopSimulation}
-                                className="w-full bg-red-600 hover:bg-red-500 text-white font-bold py-2 px-4 rounded"
-                            >
-                                ■ Stop
-                            </button>
+                            <>
+                                {!isRunning ? (
+                                    <button
+                                        onClick={() => startPlayback(sessionId)}
+                                        className="w-full bg-green-600 hover:bg-green-500 text-white font-bold py-2 px-4 rounded mb-2"
+                                    >
+                                        ▶ Resume
+                                    </button>
+                                ) : (
+                                    <button
+                                        onClick={stopSimulation}
+                                        className="w-full bg-red-600 hover:bg-red-500 text-white font-bold py-2 px-4 rounded mb-2"
+                                    >
+                                        ■ Pause
+                                    </button>
+                                )}
+                                
+                                <button
+                                    onClick={stepOnce}
+                                    disabled={isRunning}
+                                    className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-2 px-4 rounded disabled:opacity-50"
+                                >
+                                    → Step
+                                </button>
+                            </>
                         )}
                     </div>
 
                     {/* Status */}
-                    <div className="space-y-2 text-sm">
-                        <div className="flex justify-between">
-                            <span className="text-slate-400">Status:</span>
-                            <span className="text-white">{status}</span>
+                    <div className="border-t border-slate-700 pt-4">
+                        <h3 className="text-xs font-bold text-blue-400 uppercase mb-2">Status</h3>
+                        <div className="space-y-2 text-xs">
+                            <div className="text-slate-300 break-words">{status}</div>
+                            
+                            {sessionId && (
+                                <>
+                                    <div className="flex justify-between">
+                                        <span className="text-slate-400">Progress:</span>
+                                        <span className="text-white">{(progress * 100).toFixed(1)}%</span>
+                                    </div>
+                                    <div className="flex justify-between">
+                                        <span className="text-slate-400">Bars:</span>
+                                        <span className="text-white">{bars.length}</span>
+                                    </div>
+                                    <div className="flex justify-between">
+                                        <span className="text-slate-400">Total OCOs:</span>
+                                        <span className="text-yellow-400">{totalOCOs}</span>
+                                    </div>
+                                    <div className="flex justify-between">
+                                        <span className="text-slate-400">Active OCOs:</span>
+                                        <span className="text-yellow-400">{activeOCOs.length}</span>
+                                    </div>
+                                    <div className="flex justify-between">
+                                        <span className="text-slate-400">Active Positions:</span>
+                                        <span className="text-cyan-400">{activePositions}</span>
+                                    </div>
+                                    <div className="flex justify-between">
+                                        <span className="text-slate-400">Closed Positions:</span>
+                                        <span className="text-slate-400">{closedPositions}</span>
+                                    </div>
+                                </>
+                            )}
                         </div>
-                        <div className="flex justify-between">
-                            <span className="text-slate-400">Bars:</span>
-                            <span className="text-white">{bars.length}</span>
-                        </div>
-                        <div className="flex justify-between">
-                            <span className="text-slate-400">Triggers:</span>
-                            <span className="text-yellow-400">{triggers}</span>
-                        </div>
-                        <div className="flex justify-between">
-                            <span className="text-slate-400">Wins:</span>
-                            <span className="text-green-400">{wins}</span>
-                        </div>
-                        <div className="flex justify-between">
-                            <span className="text-slate-400">Losses:</span>
-                            <span className="text-red-400">{losses}</span>
-                        </div>
-                        {ocoState && (
-                            <div className="bg-yellow-900/50 border border-yellow-600 rounded p-2 mt-4">
-                                <div className="text-yellow-400 font-bold text-xs">OCO Active</div>
-                                <div className="text-xs text-slate-300 mt-1">
-                                    Entry: ${ocoState.entry.toFixed(2)}<br />
-                                    Stop: ${ocoState.stop.toFixed(2)}<br />
-                                    TP: ${ocoState.tp.toFixed(2)}
-                                </div>
-                            </div>
-                        )}
                     </div>
+
+                    {/* Active OCOs */}
+                    {activeOCOs.length > 0 && (
+                        <div className="border-t border-slate-700 pt-4 mt-4">
+                            <h3 className="text-xs font-bold text-yellow-400 uppercase mb-2">Active OCOs</h3>
+                            {activeOCOs.map(oco => (
+                                <div key={oco.name} className="bg-yellow-900/30 border border-yellow-600 rounded p-2 mb-2">
+                                    <div className="text-yellow-400 font-bold text-xs">{oco.name}</div>
+                                    <div className="text-xs text-slate-300 mt-1">
+                                        Entry: ${oco.entry_price.toFixed(2)}<br />
+                                        Stop: ${oco.stop_price.toFixed(2)}<br />
+                                        TP: ${oco.tp_price.toFixed(2)}<br />
+                                        Status: {oco.status}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    )}
                 </div>
             </div>
         </div>
