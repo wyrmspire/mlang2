@@ -1,5 +1,40 @@
 # MLang2 Agent Tooling - Implementation Complete
 
+## Latest Updates
+
+### Interactive Simulation Platform (December 2025) ⭐
+
+**Complete redesign** of the simulation mode into an interactive trading lab with backend-owned OMS:
+
+**Architecture**:
+- Backend runs full market simulation with Order Management System (OMS)
+- DataStream yields historical bars one-by-one
+- StrategyRunner executes models/strategies and generates signals
+- OMS handles order matching, position tracking, and OCO brackets
+- Frontend displays state and sends control commands
+
+**New API Endpoints** (`/sim/*`):
+- `POST /sim/start` - Initialize session with strategy configuration
+- `POST /sim/{session_id}/step` - Advance n bars, get events and state
+- `POST /sim/{session_id}/update_params` - Change execution parameters mid-stream
+- `GET /sim/{session_id}/state` - Get current simulation state
+- `POST /sim/{session_id}/stop` - Stop and cleanup session
+
+**Frontend Features**:
+- Interactive controls: Play/Pause/Step through bars with adjustable speed
+- Strategy selection: Random, Always Long, (Future: IFVG CNN)
+- Dynamic parameters: Entry type, Stop Loss (ATR), Take Profit (multiple)
+- Real-time event log: Shows OMS activity (fills, OCOs, positions)
+- Live statistics: Track OCOs, positions, progress
+
+**Benefits**:
+- Test trained CNN models with variable execution parameters
+- See exactly when and how orders fill
+- Adjust strategy parameters mid-stream to find optimal settings
+- Close the research loop: Train → Simulate → Adjust → Retrain
+
+---
+
 ## Overview
 
 Successfully implemented a comprehensive, modular, and standardized toolkit for autonomous agents to build, test, and analyze trading strategies. The implementation addresses all requirements including model inference integration in simulation mode.
