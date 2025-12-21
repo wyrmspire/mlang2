@@ -146,5 +146,87 @@ export const api = {
             body: JSON.stringify(payload)
         });
         return response.json();
+    },
+
+    // Simulation endpoints
+    startSimulation: async (payload: {
+        strategy_name: string,
+        config?: any,
+        start_date?: string,
+        end_date?: string,
+        start_idx?: number,
+        end_idx?: number
+    }): Promise<any> => {
+        const hasBackend = await checkBackend();
+        if (!hasBackend) {
+            throw new Error('Backend unavailable. Start with: ./start.sh');
+        }
+        const response = await fetch(`${API_BASE}/sim/start`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        if (!response.ok) throw new Error('Failed to start simulation');
+        return response.json();
+    },
+
+    stepSimulation: async (sessionId: string, nBars: number = 1): Promise<any> => {
+        const hasBackend = await checkBackend();
+        if (!hasBackend) {
+            throw new Error('Backend unavailable. Start with: ./start.sh');
+        }
+        const response = await fetch(`${API_BASE}/sim/${sessionId}/step`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ n_bars: nBars })
+        });
+        if (!response.ok) throw new Error('Failed to step simulation');
+        return response.json();
+    },
+
+    updateSimParams: async (sessionId: string, params: any): Promise<any> => {
+        const hasBackend = await checkBackend();
+        if (!hasBackend) {
+            throw new Error('Backend unavailable. Start with: ./start.sh');
+        }
+        const response = await fetch(`${API_BASE}/sim/${sessionId}/update_params`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ params })
+        });
+        if (!response.ok) throw new Error('Failed to update params');
+        return response.json();
+    },
+
+    getSimState: async (sessionId: string): Promise<any> => {
+        const hasBackend = await checkBackend();
+        if (!hasBackend) {
+            throw new Error('Backend unavailable. Start with: ./start.sh');
+        }
+        const response = await fetch(`${API_BASE}/sim/${sessionId}/state`);
+        if (!response.ok) throw new Error('Failed to get sim state');
+        return response.json();
+    },
+
+    stopSimulation: async (sessionId: string): Promise<any> => {
+        const hasBackend = await checkBackend();
+        if (!hasBackend) {
+            throw new Error('Backend unavailable. Start with: ./start.sh');
+        }
+        const response = await fetch(`${API_BASE}/sim/${sessionId}/stop`, {
+            method: 'POST'
+        });
+        if (!response.ok) throw new Error('Failed to stop simulation');
+        return response.json();
+    },
+
+    listSimSessions: async (): Promise<any> => {
+        const hasBackend = await checkBackend();
+        if (!hasBackend) {
+            throw new Error('Backend unavailable. Start with: ./start.sh');
+        }
+        const response = await fetch(`${API_BASE}/sim/sessions`);
+        if (!response.ok) throw new Error('Failed to list sessions');
+        return response.json();
     }
 };

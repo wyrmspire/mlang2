@@ -37,6 +37,10 @@ app = FastAPI(title="MLang2 API", version="1.0.0")
 from src.server.replay_routes import router as replay_router
 app.include_router(replay_router)
 
+# Mount simulation router
+from src.server.sim_routes import router as sim_router
+app.include_router(sim_router)
+
 
 # CORS for frontend
 app.add_middleware(
