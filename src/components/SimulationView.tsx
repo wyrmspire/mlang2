@@ -195,9 +195,12 @@ export const SimulationView: React.FC<SimulationViewProps> = ({
                         setActiveOCOs(state.oms.active_ocos || []);
                         setActivePositions(state.oms.open_positions?.length || 0);
                         
-                        // Convert completed OCOs to VizTrade records
+                        // Convert completed OCOs to VizTrade records AND VizDecision records
                         if (state.oms.completed_ocos && state.oms.completed_ocos.length > 0) {
-                            const newTrades: VizTrade[] = state.oms.completed_ocos.map((oco: any) => {
+                            const newTrades: VizTrade[] = [];
+                            const newDecisions: VizDecision[] = [];
+                            
+                            state.oms.completed_ocos.forEach((oco: any) => {
                                 // Determine outcome from status
                                 let outcome = 'UNKNOWN';
                                 let exit_reason = 'UNKNOWN';
@@ -212,9 +215,12 @@ export const SimulationView: React.FC<SimulationViewProps> = ({
                                     exit_reason = 'TIMEOUT';
                                 }
                                 
-                                return {
-                                    trade_id: oco.name || 'unknown',
-                                    decision_id: oco.name || 'unknown',
+                                const tradeId = oco.name || 'unknown';
+                                
+                                // Create VizTrade
+                                newTrades.push({
+                                    trade_id: tradeId,
+                                    decision_id: tradeId,
                                     index: 0,
                                     direction: oco.direction || 'LONG',
                                     size: 1,
@@ -233,9 +239,40 @@ export const SimulationView: React.FC<SimulationViewProps> = ({
                                     mae: oco.mae || 0,
                                     mfe: oco.mfe || 0,
                                     fills: []
-                                };
+                                });
+                                
+                                // Create matching VizDecision with OCO data
+                                newDecisions.push({
+                                    decision_id: tradeId,
+                                    timestamp: oco.entry_time,
+                                    bar_idx: oco.entry_bar || 0,
+                                    index: 0,
+                                    scanner_id: 'simulation',
+                                    scanner_context: {},
+                                    action: 'PLACE_ORDER',
+                                    skip_reason: '',
+                                    current_price: oco.entry_price || 0,
+                                    atr: 0,
+                                    cf_outcome: outcome,
+                                    cf_pnl_dollars: 0,
+                                    oco: {
+                                        entry_price: oco.entry_price || 0,
+                                        stop_price: oco.stop_price || 0,
+                                        tp_price: oco.tp_price || 0,
+                                        entry_type: 'MARKET',
+                                        direction: oco.direction || 'LONG',
+                                        reference_type: 'PRICE',
+                                        reference_value: 0,
+                                        atr_at_creation: 0,
+                                        max_bars: 200,
+                                        stop_atr: 1.0,
+                                        tp_multiple: 1.4
+                                    }
+                                });
                             });
+                            
                             setCompletedTrades(newTrades);
+                            setCompletedDecisions(newDecisions);
                         }
                     }
                     
@@ -297,9 +334,12 @@ export const SimulationView: React.FC<SimulationViewProps> = ({
                     setActiveOCOs(state.oms.active_ocos || []);
                     setActivePositions(state.oms.open_positions?.length || 0);
                     
-                    // Convert completed OCOs to VizTrade records
+                    // Convert completed OCOs to VizTrade records AND VizDecision records
                     if (state.oms.completed_ocos && state.oms.completed_ocos.length > 0) {
-                        const newTrades: VizTrade[] = state.oms.completed_ocos.map((oco: any) => {
+                        const newTrades: VizTrade[] = [];
+                        const newDecisions: VizDecision[] = [];
+                        
+                        state.oms.completed_ocos.forEach((oco: any) => {
                             // Determine outcome from status
                             let outcome = 'UNKNOWN';
                             let exit_reason = 'UNKNOWN';
@@ -314,9 +354,12 @@ export const SimulationView: React.FC<SimulationViewProps> = ({
                                 exit_reason = 'TIMEOUT';
                             }
                             
-                            return {
-                                trade_id: oco.name || 'unknown',
-                                decision_id: oco.name || 'unknown',
+                            const tradeId = oco.name || 'unknown';
+                            
+                            // Create VizTrade
+                            newTrades.push({
+                                trade_id: tradeId,
+                                decision_id: tradeId,
                                 index: 0,
                                 direction: oco.direction || 'LONG',
                                 size: 1,
@@ -335,9 +378,40 @@ export const SimulationView: React.FC<SimulationViewProps> = ({
                                 mae: oco.mae || 0,
                                 mfe: oco.mfe || 0,
                                 fills: []
-                            };
+                            });
+                            
+                            // Create matching VizDecision with OCO data
+                            newDecisions.push({
+                                decision_id: tradeId,
+                                timestamp: oco.entry_time,
+                                bar_idx: oco.entry_bar || 0,
+                                index: 0,
+                                scanner_id: 'simulation',
+                                scanner_context: {},
+                                action: 'PLACE_ORDER',
+                                skip_reason: '',
+                                current_price: oco.entry_price || 0,
+                                atr: 0,
+                                cf_outcome: outcome,
+                                cf_pnl_dollars: 0,
+                                oco: {
+                                    entry_price: oco.entry_price || 0,
+                                    stop_price: oco.stop_price || 0,
+                                    tp_price: oco.tp_price || 0,
+                                    entry_type: 'MARKET',
+                                    direction: oco.direction || 'LONG',
+                                    reference_type: 'PRICE',
+                                    reference_value: 0,
+                                    atr_at_creation: 0,
+                                    max_bars: 200,
+                                    stop_atr: 1.0,
+                                    tp_multiple: 1.4
+                                }
+                            });
                         });
+                        
                         setCompletedTrades(newTrades);
+                        setCompletedDecisions(newDecisions);
                     }
                 }
                 
