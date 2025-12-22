@@ -86,12 +86,14 @@ python scripts/run_ict_fvg.py --start-date 2025-03-18 --weeks 4
 - View results in the stats panel
 - Load the run to visualize trades
 
-### 3. Start a Replay
+### 3. Start a Replay (New!)
 - Click "▶ Replay" button
 - Choose data source: Simulation or YFinance
 - Select model and scanner
 - Configure OCO parameters
 - Click Play to start
+
+**👉 New to replay mode? See the [Quick Start Guide](docs/QUICK_START.md) for a 5-minute tutorial!**
 
 ### 4. Analyze with AI
 - Use the chat agent in the left sidebar
@@ -126,7 +128,10 @@ mlang2/
 
 ## Documentation
 
+- **[Quick Start Guide](docs/QUICK_START.md)** - 5-minute tutorial for new users ⭐
 - **[Replay Mode Guide](docs/REPLAY_MODE.md)** - Complete guide to replay features
+- **[Simulation Mode](docs/SIMULATION_MODE.md)** - Technical simulation guide
+- **[YFinance Mode](docs/YFINANCE_MODE.md)** - Live data integration
 - **[Implementation Summary](docs/IMPLEMENTATION_SUMMARY.md)** - Architecture overview
 - **[Sweep Master Guide](docs/sweep_master_guide.md)** - Parameter optimization
 - **[Success Study](docs/success_study.md)** - Successful strategies analysis
