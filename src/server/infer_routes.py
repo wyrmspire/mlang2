@@ -22,7 +22,8 @@ _model_path = None
 class InferRequest(BaseModel):
     """Request for CNN inference."""
     bars: list  # List of {open, high, low, close, volume}
-    model_path: str = "models/ifvg_4class_cnn.pth"
+    model_path: Optional[str] = None  # Direct path (legacy)
+    model_id: Optional[str] = None    # Lookup from DB (preferred)
     threshold: float = 0.2
 
 
@@ -140,8 +141,28 @@ async def infer(request: InferRequest) -> InferResponse:
     
     Bars should be last 120 1-minute bars (or at least 60).
     Returns whether to trigger a trade and at what levels.
+    
+    Model can be specified by:
+    - model_id: Lookup from ExperimentDB (preferred, decouples from filesystem)
+    - model_path: Direct path (legacy)
     """
-    model_path = Path(request.model_path)
+    # Resolve model path
+    if request.model_id:
+        # Lookup model path from ExperimentDB
+        from src.storage import ExperimentDB
+        db = ExperimentDB()
+        experiment = db.get_run(f"train_{request.model_id}")
+        if experiment and experiment.get('model_path'):
+            model_path = Path(experiment['model_path'])
+        else:
+            # Fallback: try direct path in models/
+            model_path = Path(f"models/{request.model_id}.pth")
+    elif request.model_path:
+        model_path = Path(request.model_path)
+    else:
+        # Default fallback
+        model_path = Path("models/ifvg_4class_cnn.pth")
+    
     if not model_path.exists():
         raise HTTPException(404, f"Model not found: {model_path}")
     
