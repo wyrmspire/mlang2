@@ -674,11 +674,20 @@ model = IFVG4ClassCNN()
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 best_state, best_acc = train_model(model, train_loader, val_loader, {request.epochs}, 0.001, device)
 
-# Save
+# Save model
 Path('models').mkdir(exist_ok=True)
 torch.save(best_state, '{model_path}')
-print(f"Saved model to {model_path}")
-print(f"Accuracy: {{best_acc:.2%}}")
+
+# Output JSON with metrics for parsing
+import json as json_lib
+result = {{
+    "model_path": "{model_path}",
+    "accuracy": float(best_acc),
+    "train_samples": len(train_ds),
+    "val_samples": len(val_ds),
+    "total_records": len(records)
+}}
+print("TRAINING_RESULT:" + json_lib.dumps(result))
 """
     ]
     
@@ -692,11 +701,47 @@ print(f"Accuracy: {{best_acc:.2%}}")
         )
         
         if result.returncode == 0:
+            # Parse training metrics from output
+            training_metrics = None
+            for line in result.stdout.split('\n'):
+                if line.startswith('TRAINING_RESULT:'):
+                    try:
+                        training_metrics = json.loads(line[16:])
+                    except:
+                        pass
+            
+            # Auto-store to ExperimentDB
+            accuracy = training_metrics.get('accuracy', 0) if training_metrics else 0
+            train_samples = training_metrics.get('train_samples', 0) if training_metrics else 0
+            
+            from src.storage import ExperimentDB
+            db = ExperimentDB()
+            db.store_run(
+                run_id=f"train_{model_name}",
+                strategy="cnn_training",
+                config={
+                    "scan_run_id": request.scan_run_id,
+                    "lookback_bars": request.lookback_bars,
+                    "epochs": request.epochs,
+                    "batch_size": request.batch_size,
+                },
+                metrics={
+                    "total_trades": train_samples,  # Use samples as proxy
+                    "wins": int(train_samples * accuracy),
+                    "losses": int(train_samples * (1 - accuracy)),
+                    "win_rate": accuracy,  # Accuracy = "win rate" for training
+                    "total_pnl": 0,  # N/A for training
+                },
+                model_path=str(model_path)
+            )
+            
             return {
                 "success": True,
+                "model_id": model_name,
                 "model_path": str(model_path),
-                "message": f"Trained model from {request.scan_run_id}. Model saved to '{model_path}'.",
-                "output": result.stdout[-500:] if result.stdout else ""
+                "accuracy": accuracy,
+                "train_samples": train_samples,
+                "message": f"Trained model '{model_name}' with {accuracy:.1%} accuracy. Stored to ExperimentDB.",
             }
         else:
             return {
@@ -707,6 +752,7 @@ print(f"Accuracy: {{best_acc:.2%}}")
         return {"success": False, "error": "Training timed out (>5 min)"}
     except Exception as e:
         return {"success": False, "error": str(e)}
+
 
 # =============================================================================
 # ENDPOINTS: Experiment Database (Agent Memory)
