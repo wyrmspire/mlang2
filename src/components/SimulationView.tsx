@@ -261,6 +261,9 @@ export const SimulationView: React.FC<SimulationViewProps> = ({
                 if (outcome) {
                     const tradeId = `sim_${ocoRef.current.startTime}`;
 
+                    // Calculate duration
+                    const barsHeld = Math.max(1, Math.round((bar.time - ocoRef.current.startTime) / 60));
+
                     // Log Trade
                     const decision: VizDecision = {
                         decision_id: tradeId,
@@ -275,6 +278,13 @@ export const SimulationView: React.FC<SimulationViewProps> = ({
                             entry_type: 'MARKET', direction: ocoRef.current.direction, reference_type: '',
                             reference_value: 0, atr_at_creation: 0, max_bars: 100,
                             stop_atr: 0, tp_multiple: 0
+                        },
+                        oco_results: {
+                            simulation: {
+                                bars_held: barsHeld,
+                                outcome: outcome,
+                                pnl_dollars: (isLong ? (price - ocoRef.current.entry) : (ocoRef.current.entry - price)) * 50
+                            }
                         }
                     };
 
