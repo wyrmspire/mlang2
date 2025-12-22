@@ -46,25 +46,13 @@ class Trade:
 
 def normalize_ohlcv(ohlcv_array):
     """
-    Normalize OHLCV exactly as training/inference does.
-    Input: (N, 5) array [open, high, low, close, volume]
-    Output: (5, N) normalized array
+    Normalize OHLCV - DELEGATES TO UNIFIED ENGINE.
+    
+    For new code, use:
+        from src.features.engine import normalize_ohlcv_window
     """
-    x = ohlcv_array.T.copy()
-    
-    # Normalize OHLC by first close (percent change)
-    first_close = x[3, 0]
-    if first_close > 0:
-        x[0:4] = (x[0:4] - first_close) / first_close * 100
-    
-    # Normalize volume by max
-    max_vol = x[4].max()
-    if max_vol > 0:
-        x[4] = x[4] / max_vol
-    else:
-        x[4] = 0
-    
-    return x  # (5, N)
+    from src.features.engine import normalize_ohlcv_window
+    return normalize_ohlcv_window(ohlcv_array)
 
 
 def run_simulation(

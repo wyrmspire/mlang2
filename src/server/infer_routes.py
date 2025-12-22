@@ -118,34 +118,19 @@ def load_model(model_path: Path):
     
     return model
 
+# UNIFIED FEATURE ENGINE - Single source of truth
+# This replaces the duplicate normalize_window that was here before
+from src.features.engine import normalize_ohlcv_window, compute_atr, bars_to_model_input
 
 def normalize_window(ohlcv_array):
     """
-    Normalize to match training format.
+    Normalize OHLCV window - DELEGATES TO UNIFIED ENGINE.
     
-    Training uses:
-    - OHLC: Percent change from first close
-    - Volume: Max-normalized
-    
-    Input: (length, 5) array [open, high, low, close, volume]
-    Output: (5, length) array normalized
+    Kept for backwards compatibility, but all new code should use:
+        from src.features.engine import normalize_ohlcv_window
     """
-    # Transpose to (5, length) 
-    x = ohlcv_array.T.copy()
-    
-    # Normalize OHLC by first close (percent change)
-    first_close = x[3, 0]  # Close of first bar
-    if first_close > 0:
-        x[0:4] = (x[0:4] - first_close) / first_close * 100
-    
-    # Normalize volume by max
-    max_vol = x[4].max()
-    if max_vol > 0:
-        x[4] = x[4] / max_vol
-    else:
-        x[4] = 0
-    
-    return x  # (5, length)
+    return normalize_ohlcv_window(ohlcv_array)
+
 
 
 @router.post("", response_model=InferResponse)
