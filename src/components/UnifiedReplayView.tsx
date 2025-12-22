@@ -660,7 +660,7 @@ export const UnifiedReplayView: React.FC<UnifiedReplayViewProps> = ({
                         <div className="flex justify-between">
                             <span className="text-slate-400">Win Rate:</span>
                             <span className="text-cyan-400">
-                                {triggers > 0 ? ((wins / triggers) * 100).toFixed(1) : '0.0'}%
+                                {(wins + losses) > 0 ? ((wins / (wins + losses)) * 100).toFixed(1) : '0.0'}%
                             </span>
                         </div>
                     </div>
