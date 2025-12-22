@@ -195,6 +195,101 @@ def calculate_vwap(
 
 
 # =============================================================================
+# Settlement Price
+# =============================================================================
+
+def calculate_settlement(
+    df: pd.DataFrame,
+    settlement_time: str = "15:00",  # 3 PM
+    tz: ZoneInfo = NY_TZ
+) -> pd.Series:
+    """
+    Calculate settlement price (typically 3 PM close).
+    
+    Args:
+        df: DataFrame with close and time
+        settlement_time: Time of settlement (HH:MM format)
+    
+    Returns:
+        Series with settlement values (forward-filled)
+    """
+    df = df.copy()
+    
+    if 'time' not in df.columns:
+        raise ValueError("DataFrame must have 'time' column")
+    
+    df['time_tz'] = pd.to_datetime(df['time']).dt.tz_convert(tz)
+    hour, minute = map(int, settlement_time.split(':'))
+    settlement_time_obj = df['time_tz'].iloc[0].replace(hour=hour, minute=minute).time()
+    
+    settlement = pd.Series(np.nan, index=df.index)
+    current_settlement = None
+    prev_hour = None
+    
+    for i in range(len(df)):
+        t = df['time_tz'].iloc[i]
+        
+        # Check if crossed settlement time
+        if prev_hour is not None:
+            if prev_hour < hour <= t.hour or (prev_hour >= hour and t.hour >= hour and t.minute >= minute):
+                current_settlement = df['close'].iloc[i]
+        
+        if current_settlement is not None:
+            settlement.iloc[i] = current_settlement
+        
+        prev_hour = t.hour
+    
+    return settlement.ffill()
+
+
+# =============================================================================
+# Session Levels (PDH, PDL, PDC)
+# =============================================================================
+
+def calculate_session_levels(
+    df: pd.DataFrame,
+    tz: ZoneInfo = NY_TZ
+) -> pd.DataFrame:
+    """
+    Calculate Previous Day High, Low, Close.
+    
+    Args:
+        df: DataFrame with OHLC and time
+    
+    Returns:
+        DataFrame with columns: pdh, pdl, pdc (Previous Day High/Low/Close)
+    """
+    df = df.copy()
+    
+    if 'time' not in df.columns:
+        raise ValueError("DataFrame must have 'time' column")
+    
+    df['date'] = pd.to_datetime(df['time']).dt.date
+    
+    # Calculate daily stats
+    daily = df.groupby('date').agg({
+        'high': 'max',
+        'low': 'min', 
+        'close': 'last'
+    }).rename(columns={
+        'high': 'pdh',
+        'low': 'pdl',
+        'close': 'pdc'
+    })
+    
+    # Shift by 1 day (previous day's values)
+    daily = daily.shift(1)
+    
+    # Map back to each bar
+    levels = pd.DataFrame(index=df.index)
+    levels['pdh'] = df['date'].map(daily['pdh'])
+    levels['pdl'] = df['date'].map(daily['pdl'])
+    levels['pdc'] = df['date'].map(daily['pdc'])
+    
+    return levels
+
+
+# =============================================================================
 # Indicator Bundle
 # =============================================================================
 
