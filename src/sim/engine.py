@@ -437,6 +437,8 @@ class OrderManagementSystem:
                     'direction': p.direction,
                     'size': p.size,
                     'entry_price': p.entry_price,
+                    'entry_bar': p.entry_bar,
+                    'entry_time': p.entry_time.isoformat() if p.entry_time else None,
                     'stop_price': p.stop_price,
                     'tp_price': p.tp_price,
                     'current_pnl': p.current_pnl,
@@ -455,6 +457,41 @@ class OrderManagementSystem:
                     'bars_in_trade': oco.bars_in_trade
                 }
                 for oco in self.active_ocos
+            ],
+            'completed_ocos': [
+                {
+                    'name': oco.config.name,
+                    'status': oco.status.value,
+                    'direction': oco.config.direction,
+                    'entry_price': oco.entry_price,
+                    'stop_price': oco.stop_price,
+                    'tp_price': oco.tp_price,
+                    'entry_bar': oco.entry_bar,
+                    'entry_time': oco.entry_fill.fill_time.isoformat() if oco.entry_fill and oco.entry_fill.fill_time else None,
+                    'exit_bar': oco.exit_fill.fill_bar if oco.exit_fill else None,
+                    'exit_time': oco.exit_fill.fill_time.isoformat() if oco.exit_fill and oco.exit_fill.fill_time else None,
+                    'exit_price': oco.exit_fill.fill_price if oco.exit_fill else None,
+                    'bars_in_trade': oco.bars_in_trade,
+                    'mae': oco.mae,
+                    'mfe': oco.mfe,
+                }
+                for oco in self.completed_ocos
+            ],
+            'closed_positions': [
+                {
+                    'position_id': p.position_id,
+                    'direction': p.direction,
+                    'size': p.size,
+                    'entry_price': p.entry_price,
+                    'entry_bar': p.entry_bar,
+                    'entry_time': p.entry_time.isoformat() if p.entry_time else None,
+                    'stop_price': p.stop_price,
+                    'tp_price': p.tp_price,
+                    'current_pnl': p.current_pnl,
+                    'mae': p.mae,
+                    'mfe': p.mfe
+                }
+                for p in self.closed_positions
             ]
         }
 
