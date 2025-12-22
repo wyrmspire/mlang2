@@ -43,11 +43,25 @@ def load_model(model_path: Path):
     else:
         state_dict = checkpoint
     
-    # Check if FusionModel or SimpleCNN based on keys
+    # Determine model architecture and num_classes
+    num_classes = 2
+    # Check for FusionModel classifier (layer 6)
+    if 'classifier.6.weight' in state_dict:
+        num_classes = state_dict['classifier.6.weight'].shape[0]
+    elif 'classifier.6.bias' in state_dict:
+        num_classes = state_dict['classifier.6.bias'].shape[0]
+    # Check for SimpleCNN classifier (layer 4)
+    elif 'classifier.4.weight' in state_dict:
+        num_classes = state_dict['classifier.4.weight'].shape[0]
+    elif 'classifier.4.bias' in state_dict:
+        num_classes = state_dict['classifier.4.bias'].shape[0]
+        
+    emit_event('STATUS', {'message': f'Detected {num_classes} output classes in model'})
+
     if any('price_encoder' in k for k in state_dict.keys()):
-        model = FusionModel()
+        model = FusionModel(num_classes=num_classes)
     else:
-        model = SimpleCNN()
+        model = SimpleCNN(num_classes=num_classes)
     
     model.load_state_dict(state_dict)
     model.eval()
@@ -213,16 +227,61 @@ def main():
         # Emit decision event
         triggered = win_prob >= args.threshold
         
-        emit_event('DECISION', {
-            'decision_id': f'replay_{decision_count:04d}',
-            'bar_idx': bar_idx,
-            'timestamp': timestamp.isoformat() if hasattr(timestamp, 'isoformat') else str(timestamp),
-            'win_probability': round(win_prob, 4),
-            'threshold': args.threshold,
-            'triggered': triggered,
-            'price': float(current_bar['close']),
-            'atr': float(features.atr) if features.atr else 0
-        })
+        if triggered:
+            # Determine direction from class or from heuristic if scalar
+            # 4-class: 0=NoSignal, 1=Long, 2=Short, 3=Wait? (Hypothetical)
+            # Binary: 0=No, 1=Yes
+            
+            # For this patch, assume default simple Binary or assume win_prob > thresh means action.
+            # Ideally we check model logic. 
+            
+            # Simple heuristic:
+            # If we don't know direction, default to LONG for now or alternating?
+            # Actually, IFVG strategy usually implies direction from the pattern.
+            # Pure CNN Replay: The model output SHOULD imply direction.
+            # If output is single float (win_prob), it usually implies one specific setups (e.g. Long-only model?)
+            # Ref: ifvg_4class usually has [Long prob, Short prob, ...]
+            
+            # Let's inspect probs if available
+            direction = 'LONG' 
+            if 'probs' in locals():
+                if probs.shape[-1] == 3: # [No, Long, Short]
+                    if probs[0, 2] > probs[0, 1]: direction = 'SHORT'
+                elif probs.shape[-1] == 4: # [No, Long, Short, Other]
+                     if probs[0, 2] > probs[0, 1]: direction = 'SHORT'
+                # If binary, maybe >0.5 is Long? Or model is Long-Only.
+            
+            atr = float(features.atr) if features.atr else 0
+            if atr == 0: atr = current_bar['close'] * 0.001
+            
+            entry_price = float(current_bar['close'])
+            stop_price = entry_price - (2 * atr) if direction == 'LONG' else entry_price + (2 * atr)
+            tp_price = entry_price + (4 * atr) if direction == 'LONG' else entry_price - (4 * atr)
+
+            emit_event('DECISION', {
+                'decision_id': f'replay_{decision_count:04d}',
+                'bar_idx': bar_idx,
+                'timestamp': timestamp.isoformat() if hasattr(timestamp, 'isoformat') else str(timestamp),
+                'win_probability': round(win_prob, 4),
+                'threshold': args.threshold,
+                'triggered': True,
+                'price': entry_price,
+                'atr': atr,
+                'direction': direction,
+                'stop_price': stop_price,
+                'tp_price': tp_price
+            })
+        else:
+            emit_event('DECISION', {
+                'decision_id': f'replay_{decision_count:04d}',
+                'bar_idx': bar_idx,
+                'timestamp': timestamp.isoformat() if hasattr(timestamp, 'isoformat') else str(timestamp),
+                'win_probability': round(win_prob, 4),
+                'threshold': args.threshold,
+                'triggered': False,
+                'price': float(current_bar['close']),
+                'atr': float(features.atr) if features.atr else 0
+            })
         
         if triggered:
             trigger_count += 1

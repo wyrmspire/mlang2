@@ -40,17 +40,11 @@ export const SimulationView: React.FC<SimulationViewProps> = ({
     const [bars, setBars] = useState<BarData[]>([]);
     const [currentIndex, setCurrentIndex] = useState(0);
     const [status, setStatus] = useState('Ready');
-    const [ocoState, setOcoState] = useState<{ entry: number, stop: number, tp: number, startTime: number, direction: 'LONG' | 'SHORT' } | null>(null);
+    const [ocoState, setOcoState] = useState<{ entry: number, stop: number, tp: number, startTime: number } | null>(null);
     const [triggers, setTriggers] = useState(0);
     const [wins, setWins] = useState(0);
     const [losses, setLosses] = useState(0);
     const [startIndex, setStartIndex] = useState(0);
-
-    // Trade Settings
-    const [entryType, setEntryType] = useState<'MARKET' | 'LIMIT'>('MARKET');
-    const [stopAtr, setStopAtr] = useState(2.0);   // ATR multiples for stop
-    const [tpAtr, setTpAtr] = useState(4.0);       // ATR multiples for target
-    const [threshold, setThreshold] = useState(0.35); // CNN trigger threshold
 
     const intervalRef = useRef<NodeJS.Timeout | null>(null);
     const allBarsRef = useRef<BarData[]>([]);
@@ -59,7 +53,7 @@ export const SimulationView: React.FC<SimulationViewProps> = ({
     const [modelLoading, setModelLoading] = useState(false);
     const modelDecisionsRef = useRef<Map<number, ReplayDecision>>(new Map()); // Map timestamp -> Decision
 
-    const ocoRef = useRef<{ entry: number, stop: number, tp: number, startTime: number, direction: 'LONG' | 'SHORT' } | null>(null);
+    const ocoRef = useRef<{ entry: number, stop: number, tp: number, startTime: number } | null>(null);
 
     // Trade tracking
     const [completedTrades, setCompletedTrades] = useState<VizTrade[]>([]);
@@ -193,7 +187,14 @@ export const SimulationView: React.FC<SimulationViewProps> = ({
             return;
         }
 
-        // Real-time inference - no prefetch needed
+        // 1. Fetch triggers if needed (first run)
+        if (modelDecisionsRef.current.size === 0 && !modelLoading) {
+            const success = await fetchModelDecisions();
+            if (!success) {
+                // Allow proceeding without model (falls back to no trades)?
+                // Let's assume user wants to continue even if model failed (debug)
+            }
+        }
 
         setIsRunning(true);
 
@@ -232,30 +233,15 @@ export const SimulationView: React.FC<SimulationViewProps> = ({
             if (ocoRef.current) {
                 let outcome = '';
                 let price = 0;
-                const isLong = ocoRef.current.direction === 'LONG';
 
-                // Direction-aware exit logic
-                if (isLong) {
-                    if (bar.low <= ocoRef.current.stop) {
-                        outcome = 'LOSS';
-                        price = ocoRef.current.stop;
-                        setLosses(prev => prev + 1);
-                    } else if (bar.high >= ocoRef.current.tp) {
-                        outcome = 'WIN';
-                        price = ocoRef.current.tp;
-                        setWins(prev => prev + 1);
-                    }
-                } else {
-                    // SHORT: stop is above entry, TP is below
-                    if (bar.high >= ocoRef.current.stop) {
-                        outcome = 'LOSS';
-                        price = ocoRef.current.stop;
-                        setLosses(prev => prev + 1);
-                    } else if (bar.low <= ocoRef.current.tp) {
-                        outcome = 'WIN';
-                        price = ocoRef.current.tp;
-                        setWins(prev => prev + 1);
-                    }
+                if (bar.low <= ocoRef.current.stop) {
+                    outcome = 'LOSS';
+                    price = ocoRef.current.stop;
+                    setLosses(prev => prev + 1);
+                } else if (bar.high >= ocoRef.current.tp) {
+                    outcome = 'WIN';
+                    price = ocoRef.current.tp;
+                    setWins(prev => prev + 1);
                 }
 
                 if (outcome) {
@@ -272,7 +258,7 @@ export const SimulationView: React.FC<SimulationViewProps> = ({
                             entry_price: ocoRef.current.entry,
                             stop_price: ocoRef.current.stop,
                             tp_price: ocoRef.current.tp,
-                            entry_type: 'MARKET', direction: ocoRef.current.direction, reference_type: '',
+                            entry_type: 'MARKET', direction: 'LONG', reference_type: '',
                             reference_value: 0, atr_at_creation: 0, max_bars: 100,
                             stop_atr: 0, tp_multiple: 0
                         }
@@ -280,14 +266,14 @@ export const SimulationView: React.FC<SimulationViewProps> = ({
 
                     const trade: VizTrade = {
                         trade_id: tradeId, decision_id: tradeId, index: completedTradesRef.current.length,
-                        direction: ocoRef.current.direction, size: 1,
+                        direction: 'LONG', size: 1,
                         entry_time: new Date(ocoRef.current.startTime * 1000).toISOString(),
                         entry_bar: 0, entry_price: ocoRef.current.entry,
                         exit_time: new Date(bar.time * 1000).toISOString(),
                         exit_bar: 0, exit_price: price,
                         exit_reason: outcome === 'WIN' ? 'TP' : 'SL',
-                        outcome: outcome, pnl_points: isLong ? (price - ocoRef.current.entry) : (ocoRef.current.entry - price),
-                        pnl_dollars: (isLong ? (price - ocoRef.current.entry) : (ocoRef.current.entry - price)) * 50,
+                        outcome: outcome, pnl_points: price - ocoRef.current.entry,
+                        pnl_dollars: (price - ocoRef.current.entry) * 50,
                         r_multiple: outcome === 'WIN' ? 2 : -1, bars_held: 0, mae: 0, mfe: 0, fills: []
                     };
 
@@ -302,72 +288,34 @@ export const SimulationView: React.FC<SimulationViewProps> = ({
             }
 
             // --- MODEL TRIGGER LOGIC (ENTRY) ---
-            // If no active trade, call /infer every 5 bars
-            if (!ocoRef.current && idx % 5 === 0 && idx >= 60) {
-                // Build window of last 30 bars (model was trained on 30)
-                const windowBars = allBarsRef.current.slice(Math.max(0, idx - 29), idx + 1);
+            // If no active trade, check if Model triggered on this bar
+            if (!ocoRef.current) {
+                // Try Exact Match first
+                let decision = modelDecisionsRef.current.get(bar.time);
 
-                // Calculate ATR from recent bars (simple: avg of high-low)
-                const recentBars = allBarsRef.current.slice(Math.max(0, idx - 13), idx + 1);
-                const avgRange = recentBars.reduce((sum, b) => sum + (b.high - b.low), 0) / recentBars.length;
-                const atr = avgRange || (bar.close * 0.001);
+                // Try Floor Match
+                if (!decision) {
+                    decision = modelDecisionsRef.current.get(Math.floor(bar.time));
+                }
 
-                // Try both ports
-                const tryInfer = async (port: number) => {
-                    try {
-                        const res = await fetch(`http://localhost:${port}/infer`, {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({
-                                bars: windowBars.map(b => ({
-                                    open: b.open,
-                                    high: b.high,
-                                    low: b.low,
-                                    close: b.close,
-                                    volume: b.volume || 0
-                                })),
-                                model_path: 'models/ifvg_4class_cnn.pth',
-                                threshold: threshold
-                            })
-                        });
-                        return await res.json();
-                    } catch {
-                        return null;
-                    }
-                };
+                if (decision && decision.triggered) {
+                    // Use actual OCO levels from simulation if provided
+                    const entry = decision.price;
+                    const atr = decision.atr || (entry * 0.001);
+                    const stop = decision.stop_price ?? (entry - (2 * atr));
+                    const tp = decision.tp_price ?? (entry + (4 * atr));
 
-                // Call inference (try port 8000, then 8001)
-                tryInfer(8000).then(result => {
-                    if (!result) return tryInfer(8001);
-                    return result;
-                }).then(result => {
-                    if (result?.triggered && result.direction !== 'NONE' && !ocoRef.current) {
-                        // FIXED: Use current bar from allBarsRef at current idx, not stale closure
-                        const currentIdx = idx - 1; // idx was already incremented by interval
-                        const currentBar = allBarsRef.current[currentIdx] || allBarsRef.current[allBarsRef.current.length - 1];
-                        const entry = currentBar.close; // Market entry at CURRENT close
-                        const isLong = result.direction === 'LONG';
-                        const stop = isLong ? entry - (stopAtr * atr) : entry + (stopAtr * atr);
-                        const tp = isLong ? entry + (tpAtr * atr) : entry - (tpAtr * atr);
-
-                        const newOco = {
-                            entry,
-                            stop,
-                            tp,
-                            startTime: currentBar.time, // Use CURRENT bar time
-                            direction: result.direction as 'LONG' | 'SHORT'
-                        };
-                        ocoRef.current = newOco;
-                        setOcoState(newOco);
-                        setTriggers(prev => prev + 1);
-                        console.log(`CNN TRIGGER: ${result.direction} @ ${entry.toFixed(2)}, Stop: ${stop.toFixed(2)}, TP: ${tp.toFixed(2)}, Prob: ${result.probability}`);
-                    }
-                }).catch(e => console.error('Infer error:', e));
+                    const newOco = { entry, stop, tp, startTime: bar.time };
+                    ocoRef.current = newOco;
+                    setOcoState(newOco);
+                    setTriggers(prev => prev + 1);
+                    console.log('MODEL TRIGGER:', newOco, 'Prob:', decision.win_probability, 'Dir:', decision.direction);
+                }
             }
 
             idx++;
         }, speed);
-    }, [speed, startIndex, currentIndex, stopAtr, tpAtr, threshold]);
+    }, [speed, startIndex, currentIndex]);
 
     const stopSimulation = useCallback(() => {
         if (intervalRef.current) {
@@ -445,65 +393,6 @@ export const SimulationView: React.FC<SimulationViewProps> = ({
                         </select>
                     </div>
 
-                    {/* Trade Settings */}
-                    <h2 className="text-sm font-bold text-green-400 uppercase mb-2 mt-6">Trade Settings</h2>
-
-                    <div className="mb-3">
-                        <label className="text-xs text-slate-400">Entry Type</label>
-                        <select
-                            value={entryType}
-                            onChange={e => setEntryType(e.target.value as 'MARKET' | 'LIMIT')}
-                            disabled={isRunning}
-                            className="w-full bg-slate-900 border border-slate-600 rounded px-2 py-1 text-sm text-white"
-                        >
-                            <option value="MARKET">Market Order</option>
-                            <option value="LIMIT">Limit Order (future)</option>
-                        </select>
-                    </div>
-
-                    <div className="mb-3">
-                        <label className="text-xs text-slate-400">CNN Threshold</label>
-                        <input
-                            type="number"
-                            step="0.05"
-                            min="0.1"
-                            max="0.9"
-                            value={threshold}
-                            onChange={e => setThreshold(parseFloat(e.target.value) || 0.35)}
-                            disabled={isRunning}
-                            className="w-full bg-slate-900 border border-slate-600 rounded px-2 py-1 text-sm text-white"
-                        />
-                        <span className="text-xs text-slate-500">Higher = fewer triggers</span>
-                    </div>
-
-                    <div className="mb-3">
-                        <label className="text-xs text-slate-400">Stop Loss (ATR ×)</label>
-                        <input
-                            type="number"
-                            step="0.5"
-                            min="0.5"
-                            max="10"
-                            value={stopAtr}
-                            onChange={e => setStopAtr(parseFloat(e.target.value) || 2)}
-                            disabled={isRunning}
-                            className="w-full bg-slate-900 border border-slate-600 rounded px-2 py-1 text-sm text-white"
-                        />
-                    </div>
-
-                    <div className="mb-4">
-                        <label className="text-xs text-slate-400">Take Profit (ATR ×)</label>
-                        <input
-                            type="number"
-                            step="0.5"
-                            min="0.5"
-                            max="20"
-                            value={tpAtr}
-                            onChange={e => setTpAtr(parseFloat(e.target.value) || 4)}
-                            disabled={isRunning}
-                            className="w-full bg-slate-900 border border-slate-600 rounded px-2 py-1 text-sm text-white"
-                        />
-                    </div>
-
                     <div className="mb-4">
                         {!isRunning ? (
                             <button
@@ -528,16 +417,16 @@ export const SimulationView: React.FC<SimulationViewProps> = ({
                             <span className="text-white bg-slate-800 px-1 truncate max-w-[150px]" title={status}>{status}</span>
                         </div>
                         <div className="flex justify-between">
+                            <span className="text-slate-400">Decisions Loaded:</span>
+                            <span className="text-blue-400">{modelDecisionsRef.current.size}</span>
+                        </div>
+                        <div className="flex justify-between">
                             <span className="text-slate-400">Triggers:</span>
                             <span className="text-yellow-400">{completedTrades.length} / {triggers}</span>
                         </div>
                         <div className="flex justify-between">
                             <span className="text-slate-400">Wins:</span>
                             <span className="text-green-400">{wins}</span>
-                        </div>
-                        <div className="flex justify-between">
-                            <span className="text-slate-400">Losses:</span>
-                            <span className="text-red-400">{losses}</span>
                         </div>
                     </div>
                 </div>

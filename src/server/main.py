@@ -26,6 +26,10 @@ app = FastAPI(title="MLang2 API", version="1.0.0")
 from src.server.replay_routes import router as replay_router
 app.include_router(replay_router)
 
+# Mount inference router
+from src.server.infer_routes import router as infer_router
+app.include_router(infer_router)
+
 
 # CORS for frontend
 app.add_middleware(
