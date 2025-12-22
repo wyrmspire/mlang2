@@ -6,6 +6,7 @@ interface Message {
     content: string;
     type?: 'text' | 'table' | 'chart' | 'code';
     data?: any;
+    run_id?: string;  // Add run_id to message
 }
 
 interface LabResult {
@@ -18,7 +19,11 @@ interface LabResult {
     equity_curve?: number[];
 }
 
-export const LabPage: React.FC = () => {
+interface LabPageProps {
+    onLoadRun?: (runId: string) => void;
+}
+
+export const LabPage: React.FC<LabPageProps> = ({ onLoadRun }) => {
     const [messages, setMessages] = useState<Message[]>([
         {
             role: 'assistant',
@@ -55,7 +60,8 @@ export const LabPage: React.FC = () => {
                 role: 'assistant',
                 content: response.reply || 'Processing...',
                 type: response.type || 'text',
-                data: response.data
+                data: response.data,
+                run_id: response.run_id  // Capture run_id from response
             };
             setMessages(prev => [...prev, assistantMsg]);
 
@@ -88,9 +94,19 @@ export const LabPage: React.FC = () => {
     };
 
     // Render a result table
-    const renderResultTable = (result: LabResult) => (
+    const renderResultTable = (result: LabResult, runId?: string) => (
         <div className="bg-slate-800 rounded-lg p-4 my-3 border border-slate-600">
-            <div className="text-sm font-bold text-blue-400 mb-3">{result.strategy}</div>
+            <div className="flex items-center justify-between mb-3">
+                <div className="text-sm font-bold text-blue-400">{result.strategy}</div>
+                {runId && onLoadRun && (
+                    <button
+                        onClick={() => onLoadRun(runId)}
+                        className="bg-blue-600 hover:bg-blue-500 text-white text-xs px-3 py-1.5 rounded transition"
+                    >
+                        📊 Visualize
+                    </button>
+                )}
+            </div>
             <div className="grid grid-cols-3 gap-4 text-center">
                 <div>
                     <div className="text-2xl font-bold text-white">{result.trades}</div>
@@ -191,7 +207,7 @@ export const LabPage: React.FC = () => {
                     </div>
 
                     {/* Render result if attached */}
-                    {msg.data?.result && renderResultTable(msg.data.result)}
+                    {msg.data?.result && renderResultTable(msg.data.result, msg.run_id)}
                 </div>
             </div>
         );

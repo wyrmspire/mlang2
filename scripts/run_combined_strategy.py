@@ -157,7 +157,11 @@ def run_combined_strategy(days: int = 7, starting_balance: float = 50000) -> Dic
     df = df.reset_index()
     df['time'] = pd.to_datetime(
         df['Datetime'] if 'Datetime' in df.columns else df['datetime']
-    ).dt.tz_convert(EST)
+    )
+    # Fix timezone safety: localize to UTC if naive, then convert to EST
+    if df['time'].dt.tz is None:
+        df['time'] = df['time'].dt.tz_localize('UTC')
+    df['time'] = df['time'].dt.tz_convert(EST)
     df['date'] = df['time'].dt.date
     
     print(f"    Loaded {len(df)} bars")

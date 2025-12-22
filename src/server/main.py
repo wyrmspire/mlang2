@@ -8,6 +8,7 @@ Run:
 
 import os
 import json
+import re
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 from fastapi import FastAPI, HTTPException, Query
@@ -509,6 +510,7 @@ async def lab_agent(request: LabChatRequest):
     # Parse intent from message
     result = None
     reply = ""
+    run_id = None  # Track run_id for visualization
     
     # Check for strategy execution requests
     if "ema" in last_message and ("scan" in last_message or "run" in last_message):
@@ -536,7 +538,6 @@ async def lab_agent(request: LabChatRequest):
                         reply += line + "\n"
                 
                 # Try to extract numbers for result card
-                import re
                 trades_match = re.search(r"Found (\d+) signals", output)
                 wins_match = re.search(r"WIN: (\d+)", output)
                 wr_match = re.search(r"Win Rate: ([\d.]+)%", output)
@@ -575,11 +576,16 @@ async def lab_agent(request: LabChatRequest):
     elif "lunch" in last_message and "fade" in last_message:
         try:
             proc = subprocess.run(
-                ["python", "scripts/run_lunch_fade.py", "--days", "7"],
+                ["python", "scripts/run_lunch_fade.py", "--days", "7", "--save"],
                 capture_output=True, text=True, timeout=120, cwd=str(RESULTS_DIR.parent)
             )
             output = proc.stdout
             reply = "Lunch Hour Fade Results:\n" + output.split("RESULTS")[1] if "RESULTS" in output else output
+            
+            # Extract run_id from output
+            run_id_match = re.search(r"Saved to ExperimentDB: (\S+)", output)
+            if run_id_match:
+                run_id = run_id_match.group(1)
         except Exception as e:
             reply = f"Error: {str(e)}"
     
@@ -593,6 +599,11 @@ async def lab_agent(request: LabChatRequest):
             reply = "Combined Strategy Results:\n"
             if "RESULTS" in output:
                 reply += output.split("RESULTS")[1]
+            
+            # Extract run_id from output
+            run_id_match = re.search(r"Stored: (\S+)", output)
+            if run_id_match:
+                run_id = run_id_match.group(1)
         except Exception as e:
             reply = f"Error: {str(e)}"
     
@@ -624,7 +635,8 @@ What would you like to test?"""
         "reply": reply,
         "type": "text",
         "data": {"result": result} if result else None,
-        "result": result
+        "result": result,
+        "run_id": run_id  # Include run_id for visualization
     }
 
 

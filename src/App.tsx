@@ -140,7 +140,12 @@ const App: React.FC = () => {
           </button>
         </div>
         <div className="flex-1">
-          <LabPage />
+          <LabPage 
+            onLoadRun={(runId: string) => {
+              setCurrentRun(runId);
+              setCurrentPage('trade');
+            }} 
+          />
         </div>
       </div>
     );

@@ -212,6 +212,132 @@ class RSIExtremeScanner(Scanner):
         )
 
 
+class ScriptScanner(Scanner):
+    """
+    Scanner that wraps standalone research scripts.
+    
+    This adapter allows successful research scripts (run_lunch_fade.py, run_rvap_scan.py, etc.)
+    to be integrated into the main application pipeline without rewriting them as Scanner classes.
+    
+    The script must expose either:
+    - get_signals(df, **kwargs) -> List[Dict]: Returns list of signal dictionaries
+    - scan(df, idx, **kwargs) -> Optional[Dict]: Returns signal dict for specific bar or None
+    
+    Example:
+        scanner = ScriptScanner(
+            script_path="scripts/run_lunch_fade.py",
+            script_kwargs={'stop_atr_mult': 0.5}
+        )
+    """
+    
+    def __init__(
+        self,
+        script_path: str,
+        script_kwargs: Optional[Dict[str, Any]] = None
+    ):
+        """
+        Args:
+            script_path: Path to Python script (e.g., 'scripts/run_lunch_fade.py')
+            script_kwargs: Optional kwargs to pass to the script's scan/get_signals function
+        """
+        self.script_path = script_path
+        self.script_kwargs = script_kwargs or {}
+        self._script_module = None
+        self._scan_function = None
+        self._load_script()
+    
+    def _load_script(self):
+        """Dynamically import the script and find the scan/get_signals function."""
+        import importlib.util
+        from pathlib import Path
+        
+        script_file = Path(self.script_path)
+        if not script_file.exists():
+            raise FileNotFoundError(f"Script not found: {self.script_path}")
+        
+        # Load module from file path
+        spec = importlib.util.spec_from_file_location("script_module", script_file)
+        if spec is None or spec.loader is None:
+            raise ImportError(f"Could not load script: {self.script_path}")
+        
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        self._script_module = module
+        
+        # Look for scan or get_signals function
+        if hasattr(module, 'get_signals'):
+            self._scan_function = module.get_signals
+        elif hasattr(module, 'scan'):
+            self._scan_function = module.scan
+        else:
+            raise AttributeError(
+                f"Script {self.script_path} must expose either 'get_signals' or 'scan' function"
+            )
+    
+    @property
+    def scanner_id(self) -> str:
+        script_name = Path(self.script_path).stem
+        return f"script_{script_name}"
+    
+    def scan(
+        self,
+        state: MarketState,
+        features: FeatureBundle
+    ) -> ScannerResult:
+        """
+        Call the script's scan function with current state.
+        
+        Note: This creates minimal bar data from MarketState.
+        For batch scripts (get_signals), you may need to buffer state history.
+        
+        Limitation: Uses current_price for all OHLC values as MarketState
+        doesn't track individual bar OHLC. Scripts requiring realistic 
+        price movements should be converted to proper Scanner classes.
+        """
+        try:
+            # Build a minimal DataFrame from state for compatibility
+            # Most scripts expect DataFrame with OHLCV columns
+            bar_data = {
+                'time': [state.current_time],
+                'open': [state.current_price],  # Simplified - same price for all
+                'high': [state.current_price],
+                'low': [state.current_price],
+                'close': [state.current_price],
+                'volume': [0],  # Volume not tracked in MarketState
+            }
+            
+            import pandas as pd
+            df = pd.DataFrame(bar_data)
+            
+            # Call script function
+            # Check function capabilities by attempting to call it
+            if self._scan_function.__name__ == 'get_signals':
+                # Batch function - expects full DataFrame
+                signals = self._scan_function(df, **self.script_kwargs)
+                # Check if any signal for current bar
+                triggered = len(signals) > 0
+                context = signals[0] if signals else {}
+            else:
+                # Single bar scan function
+                signal = self._scan_function(df, 0, **self.script_kwargs)
+                triggered = signal is not None
+                context = signal or {}
+            
+            return ScannerResult(
+                scanner_id=self.scanner_id,
+                triggered=triggered,
+                context=context,
+                score=context.get('score', 1.0) if triggered else 0.0
+            )
+        except Exception as e:
+            # Log error but don't crash - allows graceful degradation
+            return ScannerResult(
+                scanner_id=self.scanner_id,
+                triggered=False,
+                context={'error': str(e)}
+            )
+
+
 def _discover_library_scanners() -> Dict[str, type]:
     """Helper to find all Scanner classes in the library."""
     import importlib
@@ -244,6 +370,7 @@ def get_scanner(scanner_id: str, **kwargs) -> Scanner:
         'interval': IntervalScanner,
         'level_proximity': LevelProximityScanner,
         'rsi_extreme': RSIExtremeScanner,
+        'script': ScriptScanner,  # New: ScriptScanner adapter
     }
     
     # Add discovered library scanners
