@@ -135,6 +135,24 @@ export const api = {
         }
     },
 
+    postLabAgent: async (messages: ChatMessage[]): Promise<any> => {
+        const hasBackend = await checkBackend();
+        if (!hasBackend) {
+            return { reply: 'Backend not connected. Start with: ./start.sh' };
+        }
+        try {
+            const response = await fetch(`${API_BASE}/lab/agent`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ messages }),
+            });
+            if (!response.ok) return { reply: 'Error contacting lab agent.' };
+            return response.json();
+        } catch {
+            return { reply: 'Error contacting lab agent.' };
+        }
+    },
+
     runStrategy: async (payload: any): Promise<any> => {
         const hasBackend = await checkBackend();
         if (!hasBackend) {

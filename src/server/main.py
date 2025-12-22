@@ -487,6 +487,148 @@ async def agent_chat(request: ChatRequest) -> AgentResponse:
 
 
 # =============================================================================
+# ENDPOINTS: Lab Research Agent
+# =============================================================================
+
+class LabChatRequest(BaseModel):
+    messages: List[ChatMessage]
+
+
+@app.post("/lab/agent")
+async def lab_agent(request: LabChatRequest):
+    """
+    Lab research agent - can execute strategies and return structured results.
+    """
+    import subprocess
+    
+    if not request.messages:
+        return {"reply": "No message provided."}
+    
+    last_message = request.messages[-1].content.lower()
+    
+    # Parse intent from message
+    result = None
+    reply = ""
+    
+    # Check for strategy execution requests
+    if "ema" in last_message and ("scan" in last_message or "run" in last_message):
+        strategy = "cross"
+        if "bounce" in last_message:
+            strategy = "bounce"
+        elif "stack" in last_message:
+            strategy = "stack"
+        
+        # Run the EMA scan
+        try:
+            proc = subprocess.run(
+                ["python", "scripts/run_ema_scan.py", "--strategy", strategy, "--days", "7"],
+                capture_output=True, text=True, timeout=120, cwd=str(RESULTS_DIR.parent)
+            )
+            
+            # Parse output for results
+            output = proc.stdout
+            if "Win Rate:" in output:
+                lines = output.split("\n")
+                for line in lines:
+                    if "Found" in line:
+                        reply += line + "\n"
+                    if "WIN:" in line or "LONG:" in line or "Win Rate:" in line:
+                        reply += line + "\n"
+                
+                # Try to extract numbers for result card
+                import re
+                trades_match = re.search(r"Found (\d+) signals", output)
+                wins_match = re.search(r"WIN: (\d+)", output)
+                wr_match = re.search(r"Win Rate: ([\d.]+)%", output)
+                
+                if trades_match and wins_match and wr_match:
+                    trades = int(trades_match.group(1))
+                    wins = int(wins_match.group(1))
+                    wr = float(wr_match.group(1)) / 100
+                    result = {
+                        "strategy": f"EMA {strategy.title()}",
+                        "trades": trades,
+                        "wins": wins,
+                        "losses": trades - wins,
+                        "win_rate": wr,
+                        "total_pnl": 0
+                    }
+            else:
+                reply = f"Ran EMA {strategy} scan:\n{output}"
+        except Exception as e:
+            reply = f"Error running strategy: {str(e)}"
+    
+    elif "orb" in last_message or "opening range" in last_message:
+        try:
+            proc = subprocess.run(
+                ["python", "scripts/run_orb_gridsearch.py", "--days", "7"],
+                capture_output=True, text=True, timeout=180, cwd=str(RESULTS_DIR.parent)
+            )
+            output = proc.stdout
+            reply = "ORB Grid Search Complete!\n\n"
+            if "BEST CONFIGURATION" in output:
+                start = output.index("BEST CONFIGURATION")
+                reply += output[start:]
+        except Exception as e:
+            reply = f"Error: {str(e)}"
+    
+    elif "lunch" in last_message and "fade" in last_message:
+        try:
+            proc = subprocess.run(
+                ["python", "scripts/run_lunch_fade.py", "--days", "7"],
+                capture_output=True, text=True, timeout=120, cwd=str(RESULTS_DIR.parent)
+            )
+            output = proc.stdout
+            reply = "Lunch Hour Fade Results:\n" + output.split("RESULTS")[1] if "RESULTS" in output else output
+        except Exception as e:
+            reply = f"Error: {str(e)}"
+    
+    elif "combined" in last_message or ("orb" in last_message and "reversion" in last_message):
+        try:
+            proc = subprocess.run(
+                ["python", "scripts/run_combined_strategy.py", "--days", "7"],
+                capture_output=True, text=True, timeout=120, cwd=str(RESULTS_DIR.parent)
+            )
+            output = proc.stdout
+            reply = "Combined Strategy Results:\n"
+            if "RESULTS" in output:
+                reply += output.split("RESULTS")[1]
+        except Exception as e:
+            reply = f"Error: {str(e)}"
+    
+    elif "experiment" in last_message or "history" in last_message or "best" in last_message:
+        # Query experiment database
+        try:
+            from src.storage import ExperimentDB
+            db = ExperimentDB()
+            best = db.query_best("win_rate", top_k=5)
+            reply = "## Top 5 Experiments by Win Rate\n\n"
+            for exp in best:
+                reply += f"- **{exp.get('strategy', 'unknown')}**: {exp.get('win_rate', 0):.1%} WR, {exp.get('total_trades', 0)} trades\n"
+        except Exception as e:
+            reply = f"Error querying experiments: {str(e)}"
+    
+    else:
+        # General response
+        reply = """I can help you run strategies and analyze results. Try:
+
+- "Run EMA cross scan"
+- "Test the lunch hour fade strategy"
+- "Run ORB grid search"
+- "Show experiment history"
+- "Combined ORB + Mean Reversion"
+
+What would you like to test?"""
+    
+    return {
+        "reply": reply,
+        "type": "text",
+        "data": {"result": result} if result else None,
+        "result": result
+    }
+
+
+# =============================================================================
 # ENDPOINTS: Strategy Runner (Agent Tool)
 # =============================================================================
 

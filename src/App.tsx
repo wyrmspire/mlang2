@@ -8,8 +8,12 @@ import { DetailsPanel } from './components/DetailsPanel';
 import { ChatAgent } from './components/ChatAgent';
 import { SimulationView } from './components/SimulationView';
 import { StatsPanel } from './components/StatsPanel';
+import { LabPage } from './components/LabPage';
+
+type PageType = 'trade' | 'lab';
 
 const App: React.FC = () => {
+  const [currentPage, setCurrentPage] = useState<PageType>('trade');
   const [currentRun, setCurrentRun] = useState<string>('');
   const [mode, setMode] = useState<'DECISION' | 'TRADE'>('DECISION');
   const [index, setIndex] = useState<number>(0);
@@ -116,14 +120,48 @@ const App: React.FC = () => {
 
   const maxIndex = mode === 'DECISION' ? decisions.length - 1 : trades.length - 1;
 
-  // Always show main UI - no blocking load screen
+  // If Lab page is active, render it instead
+  if (currentPage === 'lab') {
+    return (
+      <div className="flex flex-col h-screen w-full bg-slate-900">
+        {/* Page Navigation */}
+        <div className="h-12 flex items-center gap-4 px-4 bg-slate-800 border-b border-slate-700">
+          <button
+            onClick={() => setCurrentPage('trade')}
+            className="text-slate-400 hover:text-white px-3 py-1"
+          >
+            Trade View
+          </button>
+          <button
+            onClick={() => setCurrentPage('lab')}
+            className="text-white bg-blue-600 px-3 py-1 rounded"
+          >
+            🔬 Lab
+          </button>
+        </div>
+        <div className="flex-1">
+          <LabPage />
+        </div>
+      </div>
+    );
+  }
+
+  // Trade View (default)
   return (
     <div className="flex h-screen w-full bg-slate-900 overflow-hidden">
 
       {/* LEFT SIDEBAR */}
       <div className="w-80 flex flex-col border-r border-slate-700 bg-slate-800">
         <div className="h-16 flex items-center justify-between px-4 border-b border-slate-700">
-          <h1 className="font-bold text-white text-lg">Trade Viz Agent</h1>
+          <div className="flex items-center gap-3">
+            <h1 className="font-bold text-white text-lg">Trade Viz</h1>
+            <button
+              onClick={() => setCurrentPage('lab')}
+              className="bg-green-600 hover:bg-green-500 text-white text-xs px-2 py-1 rounded"
+            >
+              🔬 Lab
+            </button>
+          </div>
           <button
             onClick={() => setShowSimulation(true)}
             className="bg-purple-600 hover:bg-purple-500 text-white text-xs px-3 py-1 rounded"
