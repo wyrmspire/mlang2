@@ -708,6 +708,86 @@ print(f"Accuracy: {{best_acc:.2%}}")
     except Exception as e:
         return {"success": False, "error": str(e)}
 
+# =============================================================================
+# ENDPOINTS: Experiment Database (Agent Memory)
+# =============================================================================
+
+@app.get("/experiments")
+async def list_experiments(
+    strategy: Optional[str] = Query(None),
+    min_trades: int = Query(10),
+    limit: int = Query(20)
+) -> Dict[str, Any]:
+    """List experiments, optionally filtered by strategy."""
+    from src.storage import ExperimentDB
+    
+    db = ExperimentDB()
+    
+    if strategy:
+        results = db.query_best("created_at", strategy=strategy, min_trades=min_trades, top_k=limit)
+    else:
+        results = db.query_best("created_at", min_trades=min_trades, top_k=limit)
+    
+    return {
+        "count": len(results),
+        "experiments": results
+    }
+
+
+@app.get("/experiments/best")
+async def get_best_experiments(
+    metric: str = Query("win_rate"),
+    strategy: Optional[str] = Query(None),
+    min_trades: int = Query(10),
+    top_k: int = Query(5)
+) -> Dict[str, Any]:
+    """
+    Get best experiments by metric.
+    
+    Metrics: win_rate, total_pnl, sharpe, profit_factor
+    """
+    from src.storage import ExperimentDB
+    
+    db = ExperimentDB()
+    results = db.query_best(metric, strategy=strategy, min_trades=min_trades, top_k=top_k)
+    
+    return {
+        "metric": metric,
+        "count": len(results),
+        "best": results
+    }
+
+
+@app.get("/experiments/strategies")
+async def list_strategies() -> Dict[str, Any]:
+    """List all strategies with aggregated stats."""
+    from src.storage import ExperimentDB
+    
+    db = ExperimentDB()
+    strategies = db.list_strategies()
+    
+    return {
+        "count": len(strategies),
+        "strategies": strategies
+    }
+
+
+@app.post("/experiments/store")
+async def store_experiment(
+    run_id: str,
+    strategy: str,
+    config: Dict[str, Any],
+    metrics: Dict[str, Any],
+    model_path: Optional[str] = None
+) -> Dict[str, Any]:
+    """Store experiment results."""
+    from src.storage import ExperimentDB
+    
+    db = ExperimentDB()
+    success = db.store_run(run_id, strategy, config, metrics, model_path)
+    
+    return {"success": success, "run_id": run_id}
+
 
 # =============================================================================
 # HEALTH CHECK
@@ -715,9 +795,15 @@ print(f"Accuracy: {{best_acc:.2%}}")
 
 @app.get("/health")
 async def health():
+    from src.storage import ExperimentDB
+    
     runs = await list_runs()
+    db = ExperimentDB()
+    
     return {
         "status": "ok", 
         "results_dir": str(RESULTS_DIR),
-        "available_runs": runs
+        "available_runs": runs,
+        "experiments_count": db.count()
     }
+

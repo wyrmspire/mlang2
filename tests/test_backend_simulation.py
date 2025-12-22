@@ -237,6 +237,7 @@ def run_simulation(
 
 if __name__ == "__main__":
     import argparse
+    from datetime import datetime
     
     parser = argparse.ArgumentParser(description="Backend simulation test")
     parser.add_argument("--model", default="models/ifvg_4class_cnn.pth", help="Model path")
@@ -245,6 +246,8 @@ if __name__ == "__main__":
     parser.add_argument("--threshold", type=float, default=0.35, help="Trigger threshold")
     parser.add_argument("--stop-atr", type=float, default=2.0, help="Stop loss ATR multiple")
     parser.add_argument("--tp-atr", type=float, default=4.0, help="Take profit ATR multiple")
+    parser.add_argument("--save", action="store_true", help="Save results to experiment database")
+    parser.add_argument("--run-id", default=None, help="Run ID for saving (auto-generated if not provided)")
     
     args = parser.parse_args()
     
@@ -256,3 +259,30 @@ if __name__ == "__main__":
         stop_atr=args.stop_atr,
         tp_atr=args.tp_atr
     )
+    
+    # Optionally save to experiment database
+    if args.save and results['trades'] > 0:
+        from src.storage import ExperimentDB
+        
+        run_id = args.run_id or f"sim_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        config = {
+            'model_path': args.model,
+            'start_date': args.start,
+            'days': args.days,
+            'threshold': args.threshold,
+            'stop_atr': args.stop_atr,
+            'tp_atr': args.tp_atr,
+        }
+        metrics = {
+            'total_trades': results['trades'],
+            'wins': results['wins'],
+            'losses': results['losses'],
+            'win_rate': results['win_rate'],
+            'total_pnl': results['total_pnl'],
+            'avg_pnl_per_trade': results['total_pnl'] / max(1, results['trades']),
+        }
+        
+        db = ExperimentDB()
+        db.store_run(run_id, "backend_simulation", config, metrics, args.model)
+        print(f"\n[5] Saved to experiment DB: {run_id}")
+
