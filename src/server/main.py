@@ -394,6 +394,7 @@ AVAILABLE ACTIONS:
 3. Load run: ACTION: {{"type": "LOAD_RUN", "payload": "<run_id>"}}
 4. RUN STRATEGY: ACTION: {{"type": "RUN_STRATEGY", "payload": {{"strategy": "modular", "config": <config_dict>}}}}
 5. START REPLAY: ACTION: {{"type": "START_REPLAY", "payload": {{"start_date": "YYYY-MM-DD", "days": 1, "speed": 10, "threshold": 0.6}}}}
+6. TRAIN FROM SCAN: ACTION: {{"type": "TRAIN_FROM_SCAN", "payload": {{"scan_run_id": "<run_id>", "model_name": "my_model"}}}}
 
 MODULAR STRATEGY FORMAT:
 {{
@@ -590,6 +591,120 @@ async def run_strategy(request: RunStrategyRequest) -> Dict[str, Any]:
             }
     except subprocess.TimeoutExpired:
         return {"success": False, "error": "Strategy timed out (>120s)"}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+# =============================================================================
+# ENDPOINTS: Agent Training (Train CNN from Scan Results)
+# =============================================================================
+
+class TrainFromScanRequest(BaseModel):
+    """Request to train a CNN from scan results."""
+    scan_run_id: str  # Run ID containing scan results (records.jsonl)
+    model_name: Optional[str] = None  # Output model name (auto-generated if not provided)
+    lookback_bars: int = 30  # Number of bars before each hit to train on
+    epochs: int = 50
+    batch_size: int = 16
+
+
+@app.post("/agent/train-from-scan")
+async def train_from_scan(request: TrainFromScanRequest) -> Dict[str, Any]:
+    """
+    Train a 4-class CNN from scan results.
+    
+    This enables the agent to:
+    1. Run a scan to find patterns
+    2. Call this endpoint to train a model
+    3. Use the model in simulation mode
+    
+    The model learns to predict LONG_WIN, LONG_LOSS, SHORT_WIN, SHORT_LOSS
+    from the N bars before each scan hit.
+    """
+    import subprocess
+    from datetime import datetime
+    
+    # Find the run directory
+    run_dir = find_run_dir(request.scan_run_id)
+    if not run_dir:
+        return {"success": False, "error": f"Scan run '{request.scan_run_id}' not found"}
+    
+    # Find records file
+    records_file = find_jsonl_file(run_dir, ["records.jsonl", "decisions.jsonl"])
+    if not records_file:
+        return {"success": False, "error": f"No records.jsonl in run '{request.scan_run_id}'"}
+    
+    # Generate model name
+    model_name = request.model_name or f"cnn_{request.scan_run_id}_{datetime.now().strftime('%H%M%S')}"
+    model_path = Path("models") / f"{model_name}.pth"
+    
+    # Build training command
+    cmd = [
+        "python", "-c", f"""
+import sys
+sys.path.insert(0, '.')
+from scripts.train_ifvg_4class import IFVG4ClassCNN, IFVG4ClassDataset, train_model
+import json
+import torch
+from torch.utils.data import DataLoader, random_split
+from pathlib import Path
+
+# Load records
+records = []
+with open('{records_file}') as f:
+    for line in f:
+        records.append(json.loads(line))
+print(f"Loaded {{len(records)}} records")
+
+# Create dataset
+dataset = IFVG4ClassDataset(records, lookback={request.lookback_bars})
+if len(dataset) < 10:
+    print("ERROR: Not enough samples")
+    sys.exit(1)
+
+# Split
+train_size = int(0.8 * len(dataset))
+val_size = len(dataset) - train_size
+train_ds, val_ds = random_split(dataset, [train_size, val_size])
+train_loader = DataLoader(train_ds, batch_size={request.batch_size}, shuffle=True)
+val_loader = DataLoader(val_ds, batch_size={request.batch_size})
+
+# Train
+model = IFVG4ClassCNN()
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+best_state, best_acc = train_model(model, train_loader, val_loader, {request.epochs}, 0.001, device)
+
+# Save
+Path('models').mkdir(exist_ok=True)
+torch.save(best_state, '{model_path}')
+print(f"Saved model to {model_path}")
+print(f"Accuracy: {{best_acc:.2%}}")
+"""
+    ]
+    
+    try:
+        result = subprocess.run(
+            cmd,
+            cwd=str(Path(__file__).parent.parent.parent),
+            capture_output=True,
+            text=True,
+            timeout=300  # 5 min timeout for training
+        )
+        
+        if result.returncode == 0:
+            return {
+                "success": True,
+                "model_path": str(model_path),
+                "message": f"Trained model from {request.scan_run_id}. Model saved to '{model_path}'.",
+                "output": result.stdout[-500:] if result.stdout else ""
+            }
+        else:
+            return {
+                "success": False,
+                "error": result.stderr[-500:] if result.stderr else result.stdout[-500:] if result.stdout else "Unknown error"
+            }
+    except subprocess.TimeoutExpired:
+        return {"success": False, "error": "Training timed out (>5 min)"}
     except Exception as e:
         return {"success": False, "error": str(e)}
 
