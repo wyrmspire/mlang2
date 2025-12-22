@@ -106,19 +106,22 @@ echo "Generating diff: local $BRANCH vs $REMOTE_BRANCH..."
     
     echo "---"
     echo ""
-    echo "## File Changes (what you'd get from remote)"
+    echo "## File Changes (YOUR UNPUSHED CHANGES)"
     echo ""
     echo '```'
-    git diff --stat HEAD "$REMOTE_BRANCH" 2>/dev/null || echo "(no changes)"
+    git diff --stat "$REMOTE_BRANCH" HEAD 2>/dev/null || echo "(no changes)"
     echo '```'
     echo ""
     
     echo "---"
     echo ""
-    echo "## Full Diff (green = new on remote, red = removed on remote)"
+    echo "## Full Diff of Your Unpushed Changes"
+    echo ""
+    echo "Green (+) = lines you ADDED locally"
+    echo "Red (-) = lines you REMOVED locally"
     echo ""
     echo '```diff'
-    git diff HEAD "$REMOTE_BRANCH" 2>/dev/null || echo "(no diff)"
+    git diff "$REMOTE_BRANCH" HEAD 2>/dev/null || echo "(no diff)"
     echo '```'
     
 } > "$OUTPUT"
@@ -127,6 +130,7 @@ echo "Done! Created $OUTPUT"
 echo ""
 echo "Summary:"
 echo "  Uncommitted files: $(git status --short 2>/dev/null | wc -l | tr -d ' ')"
-echo "  Commits ahead: $(git log --oneline "$REMOTE_BRANCH..HEAD" 2>/dev/null | wc -l | tr -d ' ')"
-echo "  Commits behind: $(git log --oneline "HEAD..$REMOTE_BRANCH" 2>/dev/null | wc -l | tr -d ' ')"
+echo "  YOUR unpushed commits: $(git log --oneline "$REMOTE_BRANCH..HEAD" 2>/dev/null | wc -l | tr -d ' ')"
+echo "  Remote commits to pull: $(git log --oneline "HEAD..$REMOTE_BRANCH" 2>/dev/null | wc -l | tr -d ' ')"
+
 
