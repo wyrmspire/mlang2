@@ -206,9 +206,9 @@ def test_full_agent_cycle():
     sim_exp = db.get_run(f"sim_{model_name}")
     
     if train_exp:
-        print(f"      ✓ Training result found: {train_exp['win_rate']:.1%} accuracy")
+        print(f"      [OK] Training result found: {train_exp['win_rate']:.1%} accuracy")
     if sim_exp:
-        print(f"      ✓ Simulation result found: {sim_exp['win_rate']:.1%} win rate, ${sim_exp['total_pnl']:.2f}")
+        print(f"      [OK] Simulation result found: {sim_exp['win_rate']:.1%} win rate, ${sim_exp['total_pnl']:.2f}")
     
     # =========================================================================
     # Summary
@@ -217,13 +217,13 @@ def test_full_agent_cycle():
     print("INTEGRATION TEST COMPLETE")
     print("=" * 70)
     print()
-    print("✓ Query existing experiments")
-    print("✓ Found scan data")
-    print("✓ Trained model")
-    print("✓ Stored training to DB")
-    print("✓ Ran simulation")
-    print("✓ Stored simulation to DB")
-    print("✓ Queried results from DB")
+    print("[OK] Query existing experiments")
+    print("[OK] Found scan data")
+    print("[OK] Trained model")
+    print("[OK] Stored training to DB")
+    print("[OK] Ran simulation")
+    print("[OK] Stored simulation to DB")
+    print("[OK] Queried results from DB")
     print()
     print("The Agent can now perform the full research cycle!")
     
