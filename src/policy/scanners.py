@@ -287,34 +287,38 @@ class ScriptScanner(Scanner):
         """
         Call the script's scan function with current state.
         
-        Note: This assumes the script can work with individual bars.
+        Note: This creates minimal bar data from MarketState.
         For batch scripts (get_signals), you may need to buffer state history.
+        
+        Limitation: Uses current_price for all OHLC values as MarketState
+        doesn't track individual bar OHLC. Scripts requiring realistic 
+        price movements should be converted to proper Scanner classes.
         """
         try:
             # Build a minimal DataFrame from state for compatibility
             # Most scripts expect DataFrame with OHLCV columns
             bar_data = {
                 'time': [state.current_time],
-                'open': [state.current_price],  # Approximate
+                'open': [state.current_price],  # Simplified - same price for all
                 'high': [state.current_price],
                 'low': [state.current_price],
                 'close': [state.current_price],
-                'volume': [0],
+                'volume': [0],  # Volume not tracked in MarketState
             }
             
             import pandas as pd
             df = pd.DataFrame(bar_data)
             
             # Call script function
-            # If it's get_signals (batch), call with full df
-            # If it's scan (single bar), call with df and idx=0
+            # Check function capabilities by attempting to call it
             if self._scan_function.__name__ == 'get_signals':
+                # Batch function - expects full DataFrame
                 signals = self._scan_function(df, **self.script_kwargs)
                 # Check if any signal for current bar
                 triggered = len(signals) > 0
                 context = signals[0] if signals else {}
             else:
-                # scan function for single bar
+                # Single bar scan function
                 signal = self._scan_function(df, 0, **self.script_kwargs)
                 triggered = signal is not None
                 context = signal or {}
@@ -326,7 +330,7 @@ class ScriptScanner(Scanner):
                 score=context.get('score', 1.0) if triggered else 0.0
             )
         except Exception as e:
-            # Log error but don't crash
+            # Log error but don't crash - allows graceful degradation
             return ScannerResult(
                 scanner_id=self.scanner_id,
                 triggered=False,
