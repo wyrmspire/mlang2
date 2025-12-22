@@ -475,7 +475,7 @@ export const SimulationView: React.FC<SimulationViewProps> = ({
                         <label className="text-xs text-slate-400">CNN Threshold</label>
                         <input
                             type="number"
-                            step="0.05"
+                            step="0.01"
                             min="0.1"
                             max="0.9"
                             value={threshold}
