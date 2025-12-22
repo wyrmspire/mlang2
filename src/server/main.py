@@ -724,6 +724,13 @@ print("TRAINING_RESULT:" + json_lib.dumps(result))
                     "lookback_bars": request.lookback_bars,
                     "epochs": request.epochs,
                     "batch_size": request.batch_size,
+                    # Architecture config - so inference can read instead of guessing
+                    "architecture": {
+                        "type": "ifvg_4class",
+                        "num_classes": 4,
+                        "input_channels": 5,
+                        "seq_length": request.lookback_bars,
+                    },
                 },
                 metrics={
                     "total_trades": train_samples,  # Use samples as proxy

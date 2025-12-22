@@ -146,14 +146,23 @@ async def infer(request: InferRequest) -> InferResponse:
     - model_id: Lookup from ExperimentDB (preferred, decouples from filesystem)
     - model_path: Direct path (legacy)
     """
-    # Resolve model path
+    # Resolve model path and architecture config
+    arch_config = None
+    
     if request.model_id:
-        # Lookup model path from ExperimentDB
+        # Lookup model path AND architecture from ExperimentDB
         from src.storage import ExperimentDB
         db = ExperimentDB()
         experiment = db.get_run(f"train_{request.model_id}")
-        if experiment and experiment.get('model_path'):
-            model_path = Path(experiment['model_path'])
+        if experiment:
+            if experiment.get('model_path'):
+                model_path = Path(experiment['model_path'])
+            else:
+                model_path = Path(f"models/{request.model_id}.pth")
+            # Extract architecture config if available
+            config = experiment.get('config', {})
+            if 'architecture' in config:
+                arch_config = config['architecture']
         else:
             # Fallback: try direct path in models/
             model_path = Path(f"models/{request.model_id}.pth")
