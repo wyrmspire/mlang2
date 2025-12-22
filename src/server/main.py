@@ -607,6 +607,53 @@ async def lab_agent(request: LabChatRequest):
         except Exception as e:
             reply = f"Error: {str(e)}"
     
+    elif "live" in last_message and ("mode" in last_message or "start" in last_message):
+        try:
+            # Default to MES ema cross
+            ticker = "MES=F"
+            strategy = "ema_cross"
+            if "ifvg" in last_message:
+                strategy = "ifvg"
+            if "es" in last_message and "mes" not in last_message:
+                ticker = "ES=F"
+                
+            cmd = [
+                "python", "scripts/run_live_mode.py",
+                "--ticker", ticker,
+                "--strategy", strategy,
+                "--days", "7"
+            ]
+            
+            # Run in background (don't wait for completion)
+            proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,  # Capture stderr too
+                cwd=str(RESULTS_DIR.parent)
+            )
+            
+            # Give it a second to start and check for immediate errors
+            import time
+            time.sleep(1)
+            if proc.poll() is not None:
+                # Process died immediately
+                out, _ = proc.communicate()
+                reply = f"Failed to start live mode:\n{out}"
+            else:
+                reply = f"**Live Simulation Started** 🟢\n\nTicker: `{ticker}`\nStrategy: `{strategy}`\nMode: YFinance Real-Time\n\nProcess ID: {proc.pid}\nThe agent is now running in the background. Check server logs for trade output."
+                
+                result = {
+                    "strategy": f"Live {strategy.upper()}",
+                    "trades": 0,
+                    "wins": 0,
+                    "losses": 0,
+                    "win_rate": 0,
+                    "total_pnl": 0
+                }
+                
+        except Exception as e:
+            reply = f"Error starting live mode: {str(e)}"
+
     elif "experiment" in last_message or "history" in last_message or "best" in last_message:
         # Query experiment database
         try:

@@ -190,6 +190,23 @@ export const api = {
         return response.json();
     },
 
+    startLiveReplay: async (ticker: string = "MES=F", strategy: string = "ema_cross", days: number = 7, speed: number = 10.0): Promise<any> => {
+        const hasBackend = await checkBackend();
+        if (!hasBackend) throw new Error('Backend unavailable');
+
+        const response = await fetch(`${API_BASE}/replay/start/live`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ticker, strategy, days, speed })
+        });
+
+        if (!response.ok) {
+            const err = await response.json();
+            throw new Error(err.detail || 'Failed to start live replay');
+        }
+        return response.json();
+    },
+
     stopReplay: async (sessionId: string): Promise<any> => {
         const hasBackend = await checkBackend();
         if (!hasBackend) return;

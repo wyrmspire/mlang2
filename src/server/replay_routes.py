@@ -36,6 +36,60 @@ class ReplayControlRequest(BaseModel):
     value: Optional[float] = None  # For speed control
 
 
+class LiveReplayRequest(BaseModel):
+    """Request to start a live yfinance session."""
+    ticker: str = "MES=F"
+    strategy: str = "ema_cross"
+    days: int = 7
+    speed: float = 10.0
+
+
+@router.post("/start/live")
+async def start_live_replay(request: LiveReplayRequest) -> Dict[str, Any]:
+    """
+    Start a LIVE yfinance simulation.
+    """
+    session_id = str(uuid.uuid4())[:8]
+    
+    cmd = [
+        "python", "scripts/run_live_mode.py",
+        "--ticker", request.ticker,
+        "--strategy", request.strategy,
+        "--days", str(request.days),
+        "--speed", str(request.speed)
+    ]
+    
+    # Start subprocess
+    try:
+        import os
+        env = os.environ.copy()
+        mlang_root = str(Path(__file__).parent.parent.parent)
+        env['PYTHONPATH'] = mlang_root
+        
+        # Windows-specific: Force unbuffered output
+        env['PYTHONUNBUFFERED'] = '1'
+        
+        process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+            cwd=mlang_root,
+            env=env
+        )
+        _sessions[session_id] = process
+        
+        return {
+            "session_id": session_id,
+            "status": "started",
+            "mode": "live",
+            "info": f"Live simulation for {request.ticker} started"
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to start live sim: {str(e)}")
+
+
 @router.post("/start")
 async def start_replay(request: ReplayStartRequest) -> Dict[str, Any]:
     """
