@@ -217,7 +217,7 @@ def main():
     # Load records
     print("\n[1] Loading IFVG trade records...")
     if not RECORDS_FILE.exists():
-        print(f"Error: {RECORDS_FILE} not found. Run run_ict_ifvg.py first.")
+        print(f"Error: {RECORDS_FILE} not found. Run backtest_ict_ifvg.py first.")
         sys.exit(1)
     
     records = []

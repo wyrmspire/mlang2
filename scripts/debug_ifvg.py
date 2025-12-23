@@ -44,7 +44,7 @@ POINT_VALUE = 50  # ES point value
 
 
 # ============================================================================
-# OUTCOME SIMULATION (copied from run_ict_ifvg.py)
+# OUTCOME SIMULATION (copied from backtest_ict_ifvg.py)
 # ============================================================================
 
 def simulate_limit_order_outcome(

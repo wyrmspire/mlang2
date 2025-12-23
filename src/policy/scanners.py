@@ -216,7 +216,7 @@ class ScriptScanner(Scanner):
     """
     Scanner that wraps standalone research scripts.
     
-    This adapter allows successful research scripts (run_lunch_fade.py, run_rvap_scan.py, etc.)
+    This adapter allows successful research scripts (backtest_lunch_fade.py, backtest_rvap.py, etc.)
     to be integrated into the main application pipeline without rewriting them as Scanner classes.
     
     The script must expose either:
