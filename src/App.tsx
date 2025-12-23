@@ -6,7 +6,7 @@ import { Navigator } from './components/Navigator';
 import { CandleChart } from './components/CandleChart';
 import { DetailsPanel } from './components/DetailsPanel';
 import { ChatAgent } from './components/ChatAgent';
-import { SimulationView } from './components/SimulationView';
+import { UnifiedReplayView } from './components/UnifiedReplayView';
 import { StatsPanel } from './components/StatsPanel';
 import { LabPage } from './components/LabPage';
 
@@ -171,7 +171,7 @@ const App: React.FC = () => {
             onClick={() => setShowSimulation(true)}
             className="bg-purple-600 hover:bg-purple-500 text-white text-xs px-3 py-1 rounded"
           >
-            ▶ Simulate
+            ▶ Replay
           </button>
         </div>
 
@@ -276,9 +276,9 @@ const App: React.FC = () => {
 
       </div>
 
-      {/* SIMULATION OVERLAY */}
+      {/* UNIFIED REPLAY OVERLAY */}
       {showSimulation && (
-        <SimulationView
+        <UnifiedReplayView
           onClose={() => setShowSimulation(false)}
           runId={currentRun}
           lastTradeTimestamp={
