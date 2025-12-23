@@ -3,7 +3,7 @@ import { CandleChart } from './CandleChart';
 import { VizTrade, VizDecision } from '../types/viz';
 import { api } from '../api/client';
 
-interface UnifiedReplayViewProps {
+interface LiveSessionViewProps {
     onClose: () => void;
     runId?: string;
     lastTradeTimestamp?: string;
@@ -43,7 +43,7 @@ const SidebarSection: React.FC<{
     );
 };
 
-export const UnifiedReplayView: React.FC<UnifiedReplayViewProps> = ({
+export const LiveSessionView: React.FC<LiveSessionViewProps> = ({
     onClose,
     runId,
     lastTradeTimestamp,
@@ -100,6 +100,7 @@ export const UnifiedReplayView: React.FC<UnifiedReplayViewProps> = ({
     // YFinance specific
     const [ticker, setTicker] = useState('MES=F');
     const [yfinanceDays, setYfinanceDays] = useState(7);
+    const [isLiveStreaming, setIsLiveStreaming] = useState(false);
 
     // Refs
     const intervalRef = useRef<NodeJS.Timeout | null>(null);
@@ -109,23 +110,43 @@ export const UnifiedReplayView: React.FC<UnifiedReplayViewProps> = ({
     const completedDecisionsRef = useRef<VizDecision[]>([]);
     const eventSourceRef = useRef<EventSource | null>(null);
     const dataSourceModeRef = useRef<DataSourceMode>(initialMode);
-    // Load data based on selected mode
+
+    // Load data based on selected mode - but NOT for YFinance (user must press Play/Live)
     useEffect(() => {
         dataSourceModeRef.current = dataSourceMode;
-        loadData();
-    }, [dataSourceMode, lastTradeTimestamp, runId, ticker, yfinanceDays]);
-
-    const loadData = async () => {
-        setStatus('Loading data...');
-        try {
-            if (dataSourceMode === 'SIMULATION') {
-                await loadSimulationData();
-            } else {
-                await loadYFinanceData();
-            }
-        } catch (e: any) {
-            setStatus(`Error: ${e.message}`);
+        if (dataSourceMode === 'SIMULATION') {
+            loadSimulationData();
+        } else {
+            // YFinance: reset state, wait for user to press Play or Go Live
+            resetState();
+            setStatus('Ready - Press Play to replay history or Go Live for realtime');
         }
+    }, [dataSourceMode, lastTradeTimestamp, runId]);
+
+    const resetState = () => {
+        if (eventSourceRef.current) {
+            eventSourceRef.current.close();
+            eventSourceRef.current = null;
+        }
+        if (intervalRef.current) {
+            clearInterval(intervalRef.current);
+            intervalRef.current = null;
+        }
+        allBarsRef.current = [];
+        setBars([]);
+        setCurrentIndex(0);
+        setStartIndex(0);
+        setOcoState(null);
+        ocoRef.current = null;
+        setTriggers(0);
+        setWins(0);
+        setLosses(0);
+        setCompletedTrades([]);
+        setCompletedDecisions([]);
+        completedTradesRef.current = [];
+        completedDecisionsRef.current = [];
+        setPlaybackState('STOPPED');
+        setIsLiveStreaming(false);
     };
 
     const loadSimulationData = async () => {
@@ -173,29 +194,82 @@ export const UnifiedReplayView: React.FC<UnifiedReplayViewProps> = ({
         setStatus('Failed to load simulation data');
     };
 
-    const loadYFinanceData = async () => {
-        // Start live YFinance session
+
+    // Fetch YFinance history for REPLAY mode (no SSE, just load bars into allBarsRef)
+    const fetchYFinanceHistory = async () => {
+        setStatus('Fetching YFinance history...');
+        try {
+            // Use yfinance endpoint to get historical bars
+            const session = await api.startLiveReplay(ticker, selectedScanner, yfinanceDays, 10.0, {
+                entry_type: entryType,
+                stop_method: stopMethod,
+                tp_method: tpMethod,
+                stop_atr: stopAtr,
+                tp_atr: tpAtr
+            });
+
+            // Connect to SSE just to receive HISTORY batch, then close
+            return new Promise<boolean>((resolve) => {
+                const es = new EventSource(`http://localhost:8000/replay/stream/${session.session_id}`);
+
+                es.onmessage = (event) => {
+                    try {
+                        const data = JSON.parse(event.data);
+
+                        if (data.type === 'HISTORY') {
+                            const historyBars: BarData[] = data.bars.map((b: any) => ({
+                                time: new Date(b.timestamp).getTime() / 1000,
+                                open: b.open,
+                                high: b.high,
+                                low: b.low,
+                                close: b.close,
+                                volume: b.volume || 0
+                            }));
+                            allBarsRef.current = historyBars;
+                            setStartIndex(0);
+                            setCurrentIndex(0);
+                            setStatus(`Loaded ${historyBars.length} bars. Press Play to start replay.`);
+
+                            // We got history, close connection (we'll replay locally)
+                            es.close();
+                            // Stop the backend process too
+                            api.stopReplay(session.session_id).catch(() => { });
+                            resolve(true);
+                        } else if (data.type === 'ERROR') {
+                            setStatus(`Error: ${data.message}`);
+                            es.close();
+                            resolve(false);
+                        }
+                    } catch (parseErr) {
+                        console.error('SSE parse error:', parseErr);
+                    }
+                };
+
+                es.onerror = () => {
+                    setStatus('Failed to fetch YFinance data');
+                    es.close();
+                    resolve(false);
+                };
+            });
+        } catch (e: any) {
+            setStatus(`YFinance error: ${e.message}`);
+            return false;
+        }
+    };
+
+    // Go Live: Fast-forward to latest candle and start realtime streaming
+    const goLive = async () => {
+        setStatus('Connecting to live feed...');
         try {
             // Close any existing connection
             if (eventSourceRef.current) {
                 eventSourceRef.current.close();
                 eventSourceRef.current = null;
             }
-
-            // Reset state for fresh start
-            allBarsRef.current = [];
-            setBars([]);
-            setCurrentIndex(0);
-            setStartIndex(0);
-            setOcoState(null);
-            ocoRef.current = null;
-            setTriggers(0);
-            setWins(0);
-            setLosses(0);
-            setCompletedTrades([]);
-            setCompletedDecisions([]);
-            completedTradesRef.current = [];
-            completedDecisionsRef.current = [];
+            if (intervalRef.current) {
+                clearInterval(intervalRef.current);
+                intervalRef.current = null;
+            }
 
             const session = await api.startLiveReplay(ticker, selectedScanner, yfinanceDays, 10.0, {
                 entry_type: entryType,
@@ -204,18 +278,20 @@ export const UnifiedReplayView: React.FC<UnifiedReplayViewProps> = ({
                 stop_atr: stopAtr,
                 tp_atr: tpAtr
             });
-            setStatus(`YFinance session started: ${session.session_id}`);
+            setStatus(`Live session started: ${session.session_id}`);
 
-            // Connect to SSE stream
+            // Connect to SSE stream for continuous updates
             const es = new EventSource(`http://localhost:8000/replay/stream/${session.session_id}`);
             eventSourceRef.current = es;
+            setIsLiveStreaming(true);
+            setPlaybackState('PLAYING');
 
             es.onmessage = (event) => {
                 try {
                     const data = JSON.parse(event.data);
 
                     if (data.type === 'HISTORY') {
-                        // Bulk load history
+                        // Bulk load history - show all at once
                         const historyBars: BarData[] = data.bars.map((b: any) => ({
                             time: new Date(b.timestamp).getTime() / 1000,
                             open: b.open,
@@ -227,8 +303,8 @@ export const UnifiedReplayView: React.FC<UnifiedReplayViewProps> = ({
                         allBarsRef.current = historyBars;
                         setBars(historyBars);
                         setCurrentIndex(historyBars.length - 1);
-                        setStartIndex(historyBars.length - 1);
-                        setStatus(`Loaded ${historyBars.length} history bars. Waiting for live...`);
+                        setStartIndex(0);
+                        setStatus(`Live: ${historyBars.length} bars loaded. Waiting for new bars...`);
                     } else if (data.type === 'BAR') {
                         const bar: BarData = {
                             time: new Date(data.timestamp).getTime() / 1000,
@@ -242,7 +318,7 @@ export const UnifiedReplayView: React.FC<UnifiedReplayViewProps> = ({
                         setBars([...allBarsRef.current]);
                         setCurrentIndex(allBarsRef.current.length - 1);
 
-                        // Process OCO exits (SL/TP hit checks)
+                        // Process OCO exits and run scanner
                         processBar(bar, allBarsRef.current.length - 1);
                     } else if (data.type === 'OCO_OPEN' || (data.type === 'DECISION' && data.triggered)) {
                         // Backend triggered a trade entry
@@ -257,15 +333,19 @@ export const UnifiedReplayView: React.FC<UnifiedReplayViewProps> = ({
                         setOcoState(newOco);
                         setTriggers(prev => prev + 1);
                     } else if (data.type === 'STATUS') {
-                        setStatus(data.message || 'YFinance streaming...');
+                        setStatus(data.message || 'Live streaming...');
                     } else if (data.type === 'STREAM_END') {
                         setStatus(`Stream ended (code: ${data.exit_code})`);
                         es.close();
                         eventSourceRef.current = null;
+                        setIsLiveStreaming(false);
+                        setPlaybackState('STOPPED');
                     } else if (data.type === 'ERROR') {
                         setStatus(`Stream error: ${data.message}`);
                         es.close();
                         eventSourceRef.current = null;
+                        setIsLiveStreaming(false);
+                        setPlaybackState('STOPPED');
                     }
                 } catch (parseErr) {
                     console.error('SSE parse error:', parseErr, event.data);
@@ -274,18 +354,20 @@ export const UnifiedReplayView: React.FC<UnifiedReplayViewProps> = ({
 
             es.onerror = (err) => {
                 console.error('SSE connection error:', err);
-                setStatus('YFinance stream error - check console');
+                setStatus('Live stream error - check console');
                 es.close();
                 eventSourceRef.current = null;
+                setIsLiveStreaming(false);
+                setPlaybackState('STOPPED');
             };
-
-            setStatus(`YFinance mode: ${ticker} (streaming...)`);
         } catch (e: any) {
-            setStatus(`YFinance error: ${e.message}`);
+            setStatus(`Live error: ${e.message}`);
+            setIsLiveStreaming(false);
         }
     };
 
-    const handlePlayPause = useCallback(() => {
+
+    const handlePlayPause = useCallback(async () => {
         if (playbackState === 'PLAYING') {
             // Pause
             if (intervalRef.current) {
@@ -295,17 +377,27 @@ export const UnifiedReplayView: React.FC<UnifiedReplayViewProps> = ({
             setPlaybackState('PAUSED');
             setStatus('Paused');
         } else {
+            // For YFinance mode: fetch history first if not loaded
+            if (dataSourceMode === 'YFINANCE' && allBarsRef.current.length === 0) {
+                const success = await fetchYFinanceHistory();
+                if (!success) return;
+            }
             // Play or Resume
             startPlayback();
         }
-    }, [playbackState, currentIndex, startIndex]);
+    }, [playbackState, currentIndex, startIndex, dataSourceMode]);
 
     const handleStop = useCallback(() => {
         if (intervalRef.current) {
             clearInterval(intervalRef.current);
             intervalRef.current = null;
         }
+        if (eventSourceRef.current) {
+            eventSourceRef.current.close();
+            eventSourceRef.current = null;
+        }
         setPlaybackState('STOPPED');
+        setIsLiveStreaming(false);
         setCurrentIndex(startIndex);
         setBars([]);
         setOcoState(null);
@@ -475,7 +567,7 @@ export const UnifiedReplayView: React.FC<UnifiedReplayViewProps> = ({
         }
 
         // Model Trigger Logic (Entry) - Only for SIMULATION mode with CNN enabled
-        // In YFinance mode, the backend (run_live_mode.py) handles strategy triggering
+        // In YFinance mode, the backend (session_live.py) handles strategy triggering
         if (dataSourceModeRef.current === 'SIMULATION' && useCnnModel && !ocoRef.current && idx % 5 === 0 && idx >= 60) {
             const windowBars = allBarsRef.current.slice(Math.max(0, idx - 29), idx + 1);
             const recentBars = allBarsRef.current.slice(Math.max(0, idx - 13), idx + 1);
@@ -544,7 +636,7 @@ export const UnifiedReplayView: React.FC<UnifiedReplayViewProps> = ({
         <div className="fixed inset-0 bg-slate-900 z-50 flex flex-col">
             {/* Header */}
             <div className="h-14 bg-slate-800 border-b border-slate-700 flex items-center justify-between px-4">
-                <h1 className="text-white font-bold">Unified Replay Mode</h1>
+                <h1 className="text-white font-bold">Live Session Mode</h1>
                 <div className="flex items-center gap-4">
                     <div className="flex items-center gap-2">
                         <span className="text-xs text-slate-400">Data Source:</span>
@@ -594,8 +686,8 @@ export const UnifiedReplayView: React.FC<UnifiedReplayViewProps> = ({
                         <div className="flex gap-2 mb-3">
                             <button
                                 onClick={handlePlayPause}
-                                disabled={allBarsRef.current.length === 0}
-                                className={`flex-1 font-bold py-2 px-3 rounded text-sm ${allBarsRef.current.length === 0
+                                disabled={dataSourceMode === 'SIMULATION' && allBarsRef.current.length === 0}
+                                className={`flex-1 font-bold py-2 px-3 rounded text-sm ${(dataSourceMode === 'SIMULATION' && allBarsRef.current.length === 0)
                                     ? 'bg-slate-700 text-slate-500 cursor-not-allowed'
                                     : playbackState === 'PLAYING'
                                         ? 'bg-yellow-600 hover:bg-yellow-500 text-white'
@@ -612,6 +704,22 @@ export const UnifiedReplayView: React.FC<UnifiedReplayViewProps> = ({
                                 ■ Stop
                             </button>
                         </div>
+
+                        {/* Go Live button - YFinance only */}
+                        {dataSourceMode === 'YFINANCE' && (
+                            <div className="mb-3">
+                                <button
+                                    onClick={goLive}
+                                    disabled={isLiveStreaming}
+                                    className={`w-full font-bold py-2 px-3 rounded text-sm ${isLiveStreaming
+                                        ? 'bg-orange-700 text-orange-300 cursor-not-allowed'
+                                        : 'bg-orange-600 hover:bg-orange-500 text-white'
+                                        }`}
+                                >
+                                    {isLiveStreaming ? '📡 Live Streaming...' : '⏩ Go Live (Realtime)'}
+                                </button>
+                            </div>
+                        )}
 
                         <div className="flex gap-2 mb-3">
                             <button
@@ -664,28 +772,15 @@ export const UnifiedReplayView: React.FC<UnifiedReplayViewProps> = ({
                     {/* Data Source Specific Settings */}
                     {dataSourceMode === 'YFINANCE' && (
                         <SidebarSection title="YFinance Settings" defaultOpen={true} colorClass="text-purple-400">
-                            <div className="mb-3">
+                            <div className="mb-1">
                                 <label className="text-xs text-slate-400 mb-1 block">Ticker</label>
                                 <input
                                     type="text"
                                     value={ticker}
                                     onChange={e => setTicker(e.target.value)}
-                                    disabled={playbackState === 'PLAYING'}
+                                    disabled={playbackState === 'PLAYING' || isLiveStreaming}
                                     className="w-full bg-slate-900 border border-slate-600 rounded px-2 py-1 text-sm text-white"
                                 />
-                            </div>
-                            <div className="mb-1">
-                                <label className="text-xs text-slate-400 mb-1 block">Days History</label>
-                                <select
-                                    value={yfinanceDays}
-                                    onChange={e => setYfinanceDays(parseInt(e.target.value))}
-                                    disabled={playbackState === 'PLAYING'}
-                                    className="w-full bg-slate-900 border border-slate-600 rounded px-2 py-1 text-sm text-white"
-                                >
-                                    <option value={1}>1 day</option>
-                                    <option value={3}>3 days</option>
-                                    <option value={7}>7 days (max)</option>
-                                </select>
                             </div>
                         </SidebarSection>
                     )}

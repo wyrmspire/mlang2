@@ -6,7 +6,7 @@ import { Navigator } from './components/Navigator';
 import { CandleChart } from './components/CandleChart';
 import { DetailsPanel } from './components/DetailsPanel';
 import { ChatAgent } from './components/ChatAgent';
-import { UnifiedReplayView } from './components/UnifiedReplayView';
+import { LiveSessionView } from './components/LiveSessionView';
 import { StatsPanel } from './components/StatsPanel';
 import { LabPage } from './components/LabPage';
 
@@ -317,7 +317,7 @@ const App: React.FC = () => {
 
       {/* UNIFIED REPLAY OVERLAY */}
       {showSimulation && (
-        <UnifiedReplayView
+        <LiveSessionView
           onClose={() => setShowSimulation(false)}
           runId={currentRun}
           initialMode={simulationMode}

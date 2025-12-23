@@ -60,7 +60,7 @@ async def start_live_replay(request: LiveReplayRequest) -> Dict[str, Any]:
     session_id = str(uuid.uuid4())[:8]
     
     cmd = [
-        "python", "scripts/run_live_mode.py",
+        "python", "scripts/session_live.py",
         "--ticker", request.ticker,
         "--strategy", request.strategy,
         "--days", str(request.days),
@@ -115,7 +115,7 @@ async def start_replay(request: ReplayStartRequest) -> Dict[str, Any]:
     
     # Select replay script based on strategy
     if request.strategy == "ifvg_4class":
-        script = "scripts/run_ifvg_simulation.py"
+        script = "scripts/session_ifvg_simulation.py"
         model = request.model_path if request.model_path != "models/best_model.pth" else "models/ifvg_4class_cnn.pth"
         cmd = [
             "python", script,
@@ -126,7 +126,7 @@ async def start_replay(request: ReplayStartRequest) -> Dict[str, Any]:
             "--min-quality", str(request.threshold),
         ]
     elif request.strategy == "ifvg":
-        script = "scripts/run_ifvg_replay.py"
+        script = "scripts/session_ifvg_replay.py"
         model = request.model_path if request.model_path != "models/best_model.pth" else "models/ifvg_cnn.pth"
         cmd = [
             "python", script,
@@ -137,7 +137,7 @@ async def start_replay(request: ReplayStartRequest) -> Dict[str, Any]:
             "--threshold", str(request.threshold),
         ]
     else:
-        script = "scripts/run_replay.py"
+        script = "scripts/session_replay.py"
         model = request.model_path
         cmd = [
             "python", script,

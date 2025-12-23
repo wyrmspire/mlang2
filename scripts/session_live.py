@@ -9,7 +9,7 @@ Runs a strategy in "Real-Time" (Simulated execution on real data).
 - Emits JSON events for the frontend UI.
 
 Usage:
-    python scripts/run_live_mode.py --ticker MES=F --strategy ema_cross
+    python scripts/session_live.py --ticker MES=F --strategy ema_cross
 """
 
 import sys

@@ -2,7 +2,7 @@
 Replay Mode Runner
 
 Run trained CNN model on historical data bar-by-bar, emitting events.
-Usage: python scripts/run_replay.py --model models/best_model.pth --start-date 2025-03-17 --days 1
+Usage: python scripts/session_replay.py --model models/best_model.pth --start-date 2025-03-17 --days 1
 """
 
 import argparse

@@ -1,10 +1,11 @@
 """
-Simulation Session
-Backend-owned simulation stepping with events.
+Market Session
+Backend-owned bar-by-bar stepping with events.
 
-This is the backend counterpart to the frontend SimulationView.
-Instead of the frontend doing stepping, the backend owns:
-- MarketStepper
+This is the unified session manager for both historical (backtest)
+and live (streaming) market data. Instead of the frontend doing stepping,
+the backend owns:
+- MarketStepper (historical or live)
 - Indicator pipeline
 - Policies/models
 - Accounts
@@ -56,12 +57,12 @@ class SimEvent:
         }
 
 
-class SimulationSession:
+class MarketSession:
     """
-    Backend simulation session.
+    Backend market session - the unified stepping engine.
     
-    Owns all simulation state:
-    - Market stepper
+    Owns all session state:
+    - Market stepper (historical or live)
     - Indicator cache
     - Active accounts
     - Active policies (scanners/models)
@@ -78,7 +79,7 @@ class SimulationSession:
         end_idx: Optional[int] = None,
     ):
         """
-        Initialize simulation session.
+        Initialize market session.
         
         Args:
             df: Full OHLCV DataFrame
