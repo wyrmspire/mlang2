@@ -157,32 +157,66 @@ def main():
         'strategy': args.strategy,
         'mode': 'LIVE_SIMULATION'
     })
+
+    # EMIT INITIAL HISTORY BATCH
+    # Convert entire history DataFrame to list of dicts for frontend
+    history_bars = []
+    for _, row in stepper.df.iterrows():
+        history_bars.append({
+            'timestamp': str(row['time']),
+            'close': float(row['close']),
+            'high': float(row['high']),
+            'low': float(row['low']),
+            'open': float(row['open']),
+            'volume': float(row['volume'])
+        })
+    emit('HISTORY', {'bars': history_bars})
     
     decision_count = 0
-    bar_delay = 1.0 / args.speed
+    # bar_delay = 1.0 / args.speed # No delay needed for history batch
     
-    print(f"Starting simulation... (History speed: {args.speed}x)", file=sys.stderr)
+    print(f"Processing history...", file=sys.stderr)
     
+    live_mode_notified = False
+
     while True:
         # Step
         step = stepper.step()
+        
+        # If None, it means we are waiting for live data
+        if step is None and stepper.live_mode:
+            if not live_mode_notified:
+                print(">>> ENTERING LIVE MODE - Waiting for market updates <<<", file=sys.stderr)
+                emit('STATUS', {'message': 'History complete. Entered LIVE mode.'})
+                live_mode_notified = True
+            time.sleep(1)
+            continue
+            
         bar = step.bar
         
-        # If we just entered live mode, notify
-        if stepper.live_mode and bar_delay != 1.0:
-            print(">>> ENTERING LIVE MODE - Waiting for market updates <<<", file=sys.stderr)
-            emit('STATUS', {'message': 'History complete. Entered LIVE mode.'})
-            bar_delay = 1.0  # Reset speed to real-time
+        # Determine if this is a "New Live Bar" or "History Bar"
+        # Since we sent history in batch, we ONLY emit BAR events for new updates
+        # How to distinguish? `stepper.live_mode` might be set AFTER we consume history.
+        # But `stepper.step()` returns bars from the DF first.
+        # Simple check: Is this bar's timestamp in our initial history batch?
+        # A crude but effective way is just to check `stepper.live_mode`.
+        # However, `YFinanceStepper` might not set `live_mode=True` until it exhausts history.
         
-        emit('BAR', {
-            'bar_idx': step.bar_idx,
-            'timestamp': str(bar['time']),
-            'close': float(bar['close']),
-            'high': float(bar['high']),
-            'low': float(bar['low']),
-            'open': float(bar['open']),
-            'volume': float(bar['volume'])
-        })
+        # Logic:
+        # If we are in history (not live_mode), do NOT emit BAR (frontend has it).
+        # We STILL run strategy to track state/trades.
+        # If we are live (live_mode=True), we EMIT BAR.
+        
+        if stepper.live_mode:
+            emit('BAR', {
+                'bar_idx': step.bar_idx,
+                'timestamp': str(bar['time']),
+                'close': float(bar['close']),
+                'high': float(bar['high']),
+                'low': float(bar['low']),
+                'open': float(bar['open']),
+                'volume': float(bar['volume'])
+            })
         
         # Run Strategy
         history = stepper.get_history(lookback=60)
@@ -239,14 +273,7 @@ def main():
                 'entry_type': final_order.entry_type
             })
             
-        # Pacing
-        # In history: sleep(delay)
-        # In live: poll already slept in stepper, so we don't need to sleep here?
-        # Actually stepper returns immediately if bar found.
-        # But if we loop tight, we might process same bar? No, step() increments.
-        # So we just need delay for visualization of history.
-        if not stepper.live_mode:
-            time.sleep(bar_delay)
+        # No artificial delay needed in history since we sent batch
 
 if __name__ == "__main__":
     main()

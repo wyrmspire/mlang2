@@ -397,6 +397,18 @@ AVAILABLE ACTIONS:
 5. START REPLAY: ACTION: {{"type": "START_REPLAY", "payload": {{"start_date": "YYYY-MM-DD", "days": 1, "speed": 10, "threshold": 0.6}}}}
 6. TRAIN FROM SCAN: ACTION: {{"type": "TRAIN_FROM_SCAN", "payload": {{"scan_run_id": "<run_id>", "model_name": "my_model"}}}}
 
+CRITICAL INSTRUCTION:
+To perform an action, you MUST include the "ACTION:" line at the end of your response.
+Do NOT just output the JSON config. You MUST wrap it in the ACTION format.
+
+Example - Run RSI Strategy:
+Okay, I'll run that strategy.
+ACTION: {{"type": "RUN_STRATEGY", "payload": {{"strategy": "modular", "config": {{"trigger": {{"type": "rsi_threshold", "oversold": 30}}, "bracket": {{"type": "atr", "stop_atr": 2, "tp_atr": 3}}}}}}}}
+
+Example - Navigate:
+Moving to the next trade.
+ACTION: {{"type": "SET_INDEX", "payload": 12}}
+
 MODULAR STRATEGY FORMAT:
 {{
   "trigger": {{"type": "...", ...}},
@@ -405,10 +417,6 @@ MODULAR STRATEGY FORMAT:
 
 TRIGGERS: {trigger_types}
 BRACKETS: {bracket_types}
-
-EXAMPLES:
-- RSI Oversold: {{"trigger": {{"type": "rsi_threshold", "oversold": 30}}, "bracket": {{"type": "atr", "stop_atr": 2, "tp_atr": 3}}}}
-- Hammer Candle: {{"trigger": {{"type": "candle_pattern", "patterns": ["hammer"]}}, "bracket": {{"type": "percent", "stop_pct": 0.5, "tp_pct": 1.0}}}}
 
 AVAILABLE STRATEGIES: "opening_range", "modular"
 TRAINED MODEL: models/best_model.pth (FusionModel CNN)
@@ -471,15 +479,50 @@ async def agent_chat(request: ChatRequest) -> AgentResponse:
             
             # Parse for ACTION
             ui_action = None
+            
+            # Helper to find JSON in text
+            def extract_json(text):
+                import re
+                match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', text, re.DOTALL)
+                if match:
+                    return match.group(1)
+                return None
+
             if "ACTION:" in reply_text:
-                action_str = reply_text.split("ACTION:")[-1].strip()
+                # Explicit ACTION format
+                parts = reply_text.split("ACTION:")
+                action_part = parts[-1].strip()
+                
+                # Check for markdown code blocks in the action part
+                json_block = extract_json(action_part)
+                action_str = json_block if json_block else action_part
+
                 try:
                     action_data = json.loads(action_str)
                     ui_action = UIAction(**action_data)
-                    # Remove action from reply text
-                    reply_text = reply_text.split("ACTION:")[0].strip()
-                except (json.JSONDecodeError, ValueError):
-                    pass
+                    reply_text = parts[0].strip()
+                except Exception as e:
+                    print(f"Failed to parse explicit ACTION: {e}")
+            
+            # Fallback: Check for implicit JSON config
+            if not ui_action:
+                import re
+                json_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', reply_text, re.DOTALL)
+                if json_match:
+                    json_block = json_match.group(1)
+                    try:
+                        data = json.loads(json_block)
+                        # Heuristic: Is this a modular strategy config?
+                        if "trigger" in data and "bracket" in data:
+                             ui_action = UIAction(type="RUN_STRATEGY", payload={"strategy": "modular", "config": data})
+                             # Remove the JSON command from chat logic
+                             reply_text = reply_text.replace(json_match.group(0), "").strip()
+                        # Heuristic: Is this a Run ID load?
+                        elif "run_id" in data and len(data) == 1:
+                             ui_action = UIAction(type="LOAD_RUN", payload=data["run_id"])
+                             reply_text = reply_text.replace(json_match.group(0), "").strip()
+                    except:
+                        pass
             
             return AgentResponse(reply=reply_text, ui_action=ui_action)
             
@@ -617,40 +660,33 @@ async def lab_agent(request: LabChatRequest):
             if "es" in last_message and "mes" not in last_message:
                 ticker = "ES=F"
                 
-            cmd = [
-                "python", "scripts/run_live_mode.py",
-                "--ticker", ticker,
-                "--strategy", strategy,
-                "--days", "7"
-            ]
+            # Use the existing endpoint logic to ensure session is registered
+            from src.server.replay_routes import start_live_replay, LiveReplayRequest
             
-            # Run in background (don't wait for completion)
-            proc = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,  # Capture stderr too
-                cwd=str(RESULTS_DIR.parent)
+            req = LiveReplayRequest(
+                ticker=ticker,
+                strategy=strategy,
+                days=7,
+                speed=10.0 # Default speed
             )
             
-            # Give it a second to start and check for immediate errors
-            import time
-            time.sleep(1)
-            if proc.poll() is not None:
-                # Process died immediately
-                out, _ = proc.communicate()
-                reply = f"Failed to start live mode:\n{out}"
-            else:
-                reply = f"**Live Simulation Started** 🟢\n\nTicker: `{ticker}`\nStrategy: `{strategy}`\nMode: YFinance Real-Time\n\nProcess ID: {proc.pid}\nThe agent is now running in the background. Check server logs for trade output."
-                
-                result = {
-                    "strategy": f"Live {strategy.upper()}",
-                    "trades": 0,
-                    "wins": 0,
-                    "losses": 0,
-                    "win_rate": 0,
-                    "total_pnl": 0
-                }
-                
+            # Await the route handler directly
+            resp = await start_live_replay(req)
+            
+            session_id = resp["session_id"]
+            run_id = session_id # For UI to connect
+            
+            reply = f"**Live Simulation Started** 🟢\n\nTicker: `{ticker}`\nStrategy: `{strategy}`\nMode: YFinance Real-Time\n\nSession ID: `{session_id}`\nThe backend is now streaming live events. Click 'Visualize' or wait for updates."
+            
+            result = {
+                "strategy": f"Live {strategy.upper()}",
+                "trades": 0,
+                "wins": 0,
+                "losses": 0,
+                "win_rate": 0,
+                "total_pnl": 0
+            }
+            
         except Exception as e:
             reply = f"Error starting live mode: {str(e)}"
 

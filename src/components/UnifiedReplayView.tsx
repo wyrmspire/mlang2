@@ -7,6 +7,7 @@ interface UnifiedReplayViewProps {
     onClose: () => void;
     runId?: string;
     lastTradeTimestamp?: string;
+    initialMode?: 'SIMULATION' | 'YFINANCE';
 }
 
 interface BarData {
@@ -21,13 +22,35 @@ interface BarData {
 type DataSourceMode = 'SIMULATION' | 'YFINANCE';
 type PlaybackState = 'STOPPED' | 'PLAYING' | 'PAUSED';
 
+const SidebarSection: React.FC<{
+    title: string;
+    children: React.ReactNode;
+    defaultOpen?: boolean;
+    colorClass?: string;
+}> = ({ title, children, defaultOpen = false, colorClass = "text-blue-400" }) => {
+    const [isOpen, setIsOpen] = useState(defaultOpen);
+    return (
+        <div className="mb-2 border-b border-slate-700 pb-2 last:border-0">
+            <button
+                onClick={() => setIsOpen(!isOpen)}
+                className={`flex items-center justify-between w-full text-xs font-bold uppercase py-1 ${colorClass} hover:opacity-80`}
+            >
+                {title}
+                <span className="text-slate-500">{isOpen ? '▼' : '▶'}</span>
+            </button>
+            {isOpen && <div className="mt-2 text-sm">{children}</div>}
+        </div>
+    );
+};
+
 export const UnifiedReplayView: React.FC<UnifiedReplayViewProps> = ({
     onClose,
     runId,
-    lastTradeTimestamp
+    lastTradeTimestamp,
+    initialMode = 'SIMULATION'
 }) => {
     // Data Source
-    const [dataSourceMode, setDataSourceMode] = useState<DataSourceMode>('SIMULATION');
+    const [dataSourceMode, setDataSourceMode] = useState<DataSourceMode>(initialMode);
 
     // Playback State
     const [playbackState, setPlaybackState] = useState<PlaybackState>('STOPPED');
@@ -85,8 +108,7 @@ export const UnifiedReplayView: React.FC<UnifiedReplayViewProps> = ({
     const completedTradesRef = useRef<VizTrade[]>([]);
     const completedDecisionsRef = useRef<VizDecision[]>([]);
     const eventSourceRef = useRef<EventSource | null>(null);
-    const dataSourceModeRef = useRef<DataSourceMode>('SIMULATION');
-
+    const dataSourceModeRef = useRef<DataSourceMode>(initialMode);
     // Load data based on selected mode
     useEffect(() => {
         dataSourceModeRef.current = dataSourceMode;
@@ -192,7 +214,22 @@ export const UnifiedReplayView: React.FC<UnifiedReplayViewProps> = ({
                 try {
                     const data = JSON.parse(event.data);
 
-                    if (data.type === 'BAR') {
+                    if (data.type === 'HISTORY') {
+                        // Bulk load history
+                        const historyBars: BarData[] = data.bars.map((b: any) => ({
+                            time: new Date(b.timestamp).getTime() / 1000,
+                            open: b.open,
+                            high: b.high,
+                            low: b.low,
+                            close: b.close,
+                            volume: b.volume || 0
+                        }));
+                        allBarsRef.current = historyBars;
+                        setBars(historyBars);
+                        setCurrentIndex(historyBars.length - 1);
+                        setStartIndex(historyBars.length - 1);
+                        setStatus(`Loaded ${historyBars.length} history bars. Waiting for live...`);
+                    } else if (data.type === 'BAR') {
                         const bar: BarData = {
                             time: new Date(data.timestamp).getTime() / 1000,
                             open: data.open,
@@ -549,13 +586,11 @@ export const UnifiedReplayView: React.FC<UnifiedReplayViewProps> = ({
                 </div>
 
                 {/* Right Sidebar - Controls */}
+                {/* Right Sidebar - Controls */}
                 <div className="w-80 bg-slate-800 border-l border-slate-700 p-4 overflow-y-auto">
-                    <h2 className="text-sm font-bold text-blue-400 uppercase mb-4">Controls</h2>
 
                     {/* Playback Controls */}
-                    <div className="mb-6">
-                        <h3 className="text-xs font-bold text-green-400 uppercase mb-2">Playback</h3>
-
+                    <SidebarSection title="Playback" defaultOpen={true} colorClass="text-green-400">
                         <div className="flex gap-2 mb-3">
                             <button
                                 onClick={handlePlayPause}
@@ -596,7 +631,7 @@ export const UnifiedReplayView: React.FC<UnifiedReplayViewProps> = ({
                         </div>
 
                         <div className="mb-3">
-                            <label className="text-xs text-slate-400">Speed (ms per bar)</label>
+                            <label className="text-xs text-slate-400 mb-1 block">Speed (ms per bar)</label>
                             <select
                                 value={speed}
                                 onChange={e => setSpeed(parseInt(e.target.value))}
@@ -610,9 +645,10 @@ export const UnifiedReplayView: React.FC<UnifiedReplayViewProps> = ({
                             </select>
                         </div>
 
-                        {/* Seek Bar */}
-                        <div className="mb-3">
-                            <label className="text-xs text-slate-400">Position: {currentIndex} / {allBarsRef.current.length}</label>
+                        <div className="mb-1">
+                            <label className="text-xs text-slate-400 mb-1 block">
+                                Position: {currentIndex} / {allBarsRef.current.length}
+                            </label>
                             <input
                                 type="range"
                                 min={startIndex}
@@ -623,14 +659,13 @@ export const UnifiedReplayView: React.FC<UnifiedReplayViewProps> = ({
                                 className="w-full"
                             />
                         </div>
-                    </div>
+                    </SidebarSection>
 
                     {/* Data Source Specific Settings */}
                     {dataSourceMode === 'YFINANCE' && (
-                        <div className="mb-6">
-                            <h3 className="text-xs font-bold text-purple-400 uppercase mb-2">YFinance Settings</h3>
+                        <SidebarSection title="YFinance Settings" defaultOpen={true} colorClass="text-purple-400">
                             <div className="mb-3">
-                                <label className="text-xs text-slate-400">Ticker</label>
+                                <label className="text-xs text-slate-400 mb-1 block">Ticker</label>
                                 <input
                                     type="text"
                                     value={ticker}
@@ -639,8 +674,8 @@ export const UnifiedReplayView: React.FC<UnifiedReplayViewProps> = ({
                                     className="w-full bg-slate-900 border border-slate-600 rounded px-2 py-1 text-sm text-white"
                                 />
                             </div>
-                            <div className="mb-3">
-                                <label className="text-xs text-slate-400">Days History</label>
+                            <div className="mb-1">
+                                <label className="text-xs text-slate-400 mb-1 block">Days History</label>
                                 <select
                                     value={yfinanceDays}
                                     onChange={e => setYfinanceDays(parseInt(e.target.value))}
@@ -652,16 +687,13 @@ export const UnifiedReplayView: React.FC<UnifiedReplayViewProps> = ({
                                     <option value={7}>7 days (max)</option>
                                 </select>
                             </div>
-                        </div>
+                        </SidebarSection>
                     )}
 
-                    {/* Model Selection - Checkbox + Dropdown */}
-                    <div className="mb-6">
-                        <h3 className="text-xs font-bold text-cyan-400 uppercase mb-2">Trigger Sources</h3>
-
-                        {/* CNN Model Checkbox */}
+                    {/* Model Selection */}
+                    <SidebarSection title="Trigger Sources" colorClass="text-cyan-400">
                         <div className="mb-3">
-                            <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer">
+                            <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer mb-1">
                                 <input
                                     type="checkbox"
                                     checked={useCnnModel}
@@ -685,9 +717,8 @@ export const UnifiedReplayView: React.FC<UnifiedReplayViewProps> = ({
                             )}
                         </div>
 
-                        {/* Pattern Scanner Checkbox */}
-                        <div className="mb-3">
-                            <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer">
+                        <div className="mb-1">
+                            <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer mb-1">
                                 <input
                                     type="checkbox"
                                     checked={usePatternScanner}
@@ -714,15 +745,13 @@ export const UnifiedReplayView: React.FC<UnifiedReplayViewProps> = ({
                         {useCnnModel && usePatternScanner && (
                             <p className="text-xs text-yellow-400 mt-1">⚠ Both enabled: requires BOTH to trigger (AND)</p>
                         )}
-                    </div>
+                    </SidebarSection>
 
                     {/* Entry Configuration */}
-                    <div className="mb-6">
-                        <h3 className="text-xs font-bold text-purple-400 uppercase mb-2">Entry Configuration</h3>
-
+                    <SidebarSection title="Entry Configuration" colorClass="text-purple-400">
                         <div className="mb-3">
-                            <label className="text-xs text-slate-400">Entry Type</label>
-                            <div className="flex gap-3 mt-1">
+                            <label className="text-xs text-slate-400 mb-1 block">Entry Type</label>
+                            <div className="flex gap-3">
                                 <label className="flex items-center gap-1 text-xs text-slate-300 cursor-pointer">
                                     <input
                                         type="radio"
@@ -749,7 +778,7 @@ export const UnifiedReplayView: React.FC<UnifiedReplayViewProps> = ({
                         </div>
 
                         <div className="mb-3">
-                            <label className="text-xs text-slate-400">Stop Placement</label>
+                            <label className="text-xs text-slate-400 mb-1 block">Stop Placement</label>
                             <select
                                 value={stopMethod}
                                 onChange={e => setStopMethod(e.target.value as any)}
@@ -762,8 +791,8 @@ export const UnifiedReplayView: React.FC<UnifiedReplayViewProps> = ({
                             </select>
                         </div>
 
-                        <div className="mb-3">
-                            <label className="text-xs text-slate-400">Take Profit</label>
+                        <div className="mb-1">
+                            <label className="text-xs text-slate-400 mb-1 block">Take Profit</label>
                             <select
                                 value={tpMethod}
                                 onChange={e => setTpMethod(e.target.value as any)}
@@ -774,13 +803,12 @@ export const UnifiedReplayView: React.FC<UnifiedReplayViewProps> = ({
                                 <option value="r_multiple">R-Multiple</option>
                             </select>
                         </div>
-                    </div>
+                    </SidebarSection>
 
                     {/* OCO Settings */}
-                    <div className="mb-6">
-                        <h3 className="text-xs font-bold text-orange-400 uppercase mb-2">OCO Settings</h3>
+                    <SidebarSection title="OCO Settings" colorClass="text-orange-400">
                         <div className="mb-3">
-                            <label className="text-xs text-slate-400">Threshold</label>
+                            <label className="text-xs text-slate-400 mb-1 block">Threshold</label>
                             <input
                                 type="number"
                                 step="0.01"
@@ -793,7 +821,7 @@ export const UnifiedReplayView: React.FC<UnifiedReplayViewProps> = ({
                             />
                         </div>
                         <div className="mb-3">
-                            <label className="text-xs text-slate-400">Stop Loss (ATR ×)</label>
+                            <label className="text-xs text-slate-400 mb-1 block">Stop Loss (ATR ×)</label>
                             <input
                                 type="number"
                                 step="0.5"
@@ -805,8 +833,8 @@ export const UnifiedReplayView: React.FC<UnifiedReplayViewProps> = ({
                                 className="w-full bg-slate-900 border border-slate-600 rounded px-2 py-1 text-sm text-white"
                             />
                         </div>
-                        <div className="mb-3">
-                            <label className="text-xs text-slate-400">Take Profit (ATR ×)</label>
+                        <div className="mb-1">
+                            <label className="text-xs text-slate-400 mb-1 block">Take Profit (ATR ×)</label>
                             <input
                                 type="number"
                                 step="0.5"
@@ -818,37 +846,39 @@ export const UnifiedReplayView: React.FC<UnifiedReplayViewProps> = ({
                                 className="w-full bg-slate-900 border border-slate-600 rounded px-2 py-1 text-sm text-white"
                             />
                         </div>
-                    </div>
+                    </SidebarSection>
 
                     {/* Status & Stats */}
-                    <div className="space-y-2 text-sm">
-                        <div className="flex justify-between">
-                            <span className="text-slate-400">Status:</span>
-                            <span className="text-white bg-slate-900 px-2 py-1 rounded text-xs">{status}</span>
+                    <SidebarSection title="Status & Stats" defaultOpen={true} colorClass="text-white">
+                        <div className="space-y-2 text-sm">
+                            <div className="flex justify-between">
+                                <span className="text-slate-400">Status:</span>
+                                <span className="text-white bg-slate-900 px-2 py-1 rounded text-xs">{status}</span>
+                            </div>
+                            <div className="flex justify-between">
+                                <span className="text-slate-400">Mode:</span>
+                                <span className="text-blue-400">{dataSourceMode}</span>
+                            </div>
+                            <div className="flex justify-between">
+                                <span className="text-slate-400">Triggers:</span>
+                                <span className="text-yellow-400">{triggers}</span>
+                            </div>
+                            <div className="flex justify-between">
+                                <span className="text-slate-400">Wins:</span>
+                                <span className="text-green-400">{wins}</span>
+                            </div>
+                            <div className="flex justify-between">
+                                <span className="text-slate-400">Losses:</span>
+                                <span className="text-red-400">{losses}</span>
+                            </div>
+                            <div className="flex justify-between">
+                                <span className="text-slate-400">Win Rate:</span>
+                                <span className="text-cyan-400">
+                                    {(wins + losses) > 0 ? ((wins / (wins + losses)) * 100).toFixed(1) : '0.0'}%
+                                </span>
+                            </div>
                         </div>
-                        <div className="flex justify-between">
-                            <span className="text-slate-400">Mode:</span>
-                            <span className="text-blue-400">{dataSourceMode}</span>
-                        </div>
-                        <div className="flex justify-between">
-                            <span className="text-slate-400">Triggers:</span>
-                            <span className="text-yellow-400">{triggers}</span>
-                        </div>
-                        <div className="flex justify-between">
-                            <span className="text-slate-400">Wins:</span>
-                            <span className="text-green-400">{wins}</span>
-                        </div>
-                        <div className="flex justify-between">
-                            <span className="text-slate-400">Losses:</span>
-                            <span className="text-red-400">{losses}</span>
-                        </div>
-                        <div className="flex justify-between">
-                            <span className="text-slate-400">Win Rate:</span>
-                            <span className="text-cyan-400">
-                                {(wins + losses) > 0 ? ((wins / (wins + losses)) * 100).toFixed(1) : '0.0'}%
-                            </span>
-                        </div>
-                    </div>
+                    </SidebarSection>
                 </div>
             </div>
         </div>

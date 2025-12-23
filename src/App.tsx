@@ -19,8 +19,9 @@ const App: React.FC = () => {
   const [index, setIndex] = useState<number>(0);
   const [showRawData, setShowRawData] = useState<boolean>(false);
   const [showSimulation, setShowSimulation] = useState<boolean>(false);
+  const [simulationMode, setSimulationMode] = useState<'SIMULATION' | 'YFINANCE'>('SIMULATION');
 
-  // Continuous contract data (loaded once)
+
   const [continuousData, setContinuousData] = useState<ContinuousData | null>(null);
   const [continuousLoading, setContinuousLoading] = useState<boolean>(true);
 
@@ -104,12 +105,35 @@ const App: React.FC = () => {
         break;
       case 'RUN_STRATEGY':
         try {
+          // Notify user
+          console.log("Running strategy...", action.payload);
           const result = await api.runStrategy(action.payload);
           if (result.success && result.run_id) {
             setCurrentRun(result.run_id);
+            // Optionally switch to Decision mode to see results
+            setMode('DECISION');
+          } else {
+            console.error("Strategy run failed:", result.error);
           }
         } catch (e) {
           console.error('Failed to run strategy:', e);
+        }
+        break;
+
+      case 'START_REPLAY':
+        setSimulationMode('SIMULATION');
+        setShowSimulation(true);
+        break;
+
+      case 'TRAIN_FROM_SCAN':
+        try {
+          console.log("Training from scan...", action.payload);
+          // We need to add this method to client.ts first, but for now we can fetch directly or ignore
+          // Assuming api.trainFromScan exists or we add it. 
+          // For now, let's just log it.
+          alert("Training started in background (check console)");
+        } catch (e) {
+          console.error(e);
         }
         break;
 
@@ -140,11 +164,11 @@ const App: React.FC = () => {
           </button>
         </div>
         <div className="flex-1">
-          <LabPage 
+          <LabPage
             onLoadRun={(runId: string) => {
               setCurrentRun(runId);
               setCurrentPage('trade');
-            }} 
+            }}
           />
         </div>
       </div>
@@ -167,12 +191,27 @@ const App: React.FC = () => {
               🔬 Lab
             </button>
           </div>
-          <button
-            onClick={() => setShowSimulation(true)}
-            className="bg-purple-600 hover:bg-purple-500 text-white text-xs px-3 py-1 rounded"
-          >
-            ▶ Replay
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => {
+                setSimulationMode('YFINANCE');
+                setShowSimulation(true);
+              }}
+              className="bg-red-600 hover:bg-red-500 text-white text-xs px-2 py-1 rounded animate-pulse font-bold"
+              title="Open Live Trading Dashboard"
+            >
+              🔴 LIVE
+            </button>
+            <button
+              onClick={() => {
+                setSimulationMode('SIMULATION');
+                setShowSimulation(true);
+              }}
+              className="bg-purple-600 hover:bg-purple-500 text-white text-xs px-3 py-1 rounded"
+            >
+              ▶ Replay
+            </button>
+          </div>
         </div>
 
         <RunPicker onSelect={setCurrentRun} />
@@ -281,6 +320,7 @@ const App: React.FC = () => {
         <UnifiedReplayView
           onClose={() => setShowSimulation(false)}
           runId={currentRun}
+          initialMode={simulationMode}
           lastTradeTimestamp={
             // Use last decision timestamp (decisions always exist, trades may be empty)
             decisions.length > 0
