@@ -9,7 +9,7 @@ This mirrors the mlang discovery in success_study.md where they found 70% WR
 by inverting a losing pattern.
 
 Usage:
-    python scripts/run_inverse_test.py --input results/ict_ifvg/records.jsonl
+    python scripts/backtest_inverse_test.py --input results/ict_ifvg/records.jsonl
 """
 
 import sys

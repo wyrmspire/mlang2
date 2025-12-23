@@ -5,7 +5,7 @@ Efficient backtesting: processes one day at a time instead of bar-by-bar.
 Records are compatible with the standard visualization format.
 
 Usage:
-    python scripts/run_ict_fvg.py --start-date 2025-03-18 --weeks 4
+    python scripts/backtest_ict_fvg.py --start-date 2025-03-18 --weeks 4
 """
 
 import sys

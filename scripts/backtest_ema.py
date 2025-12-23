@@ -11,7 +11,7 @@ Strategies:
 3. EMA Stack: All EMAs aligned (9 > 21 > 50 > 200)
 
 Usage:
-    python scripts/run_ema_scan.py --days 7 --strategy cross
+    python scripts/backtest_ema.py --days 7 --strategy cross
 """
 
 import sys

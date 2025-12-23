@@ -8,7 +8,7 @@ Stop: 0.5 ATR (tight - get out if it's a real breakout)
 Target: 2R (risk/reward = 1:2)
 
 Run:
-    python scripts/run_lunch_fade.py --days 28
+    python scripts/backtest_lunch_fade.py --days 28
 """
 
 import sys

@@ -232,7 +232,7 @@ if (ocoRef.current) {
 
 ```bash
 # 1. Generate labeled data
-python scripts/run_ict_fvg.py --start-date 2025-03-18 --weeks 8 --save
+python scripts/backtest_ict_fvg.py --start-date 2025-03-18 --weeks 8 --save
 
 # 2. Train model
 python scripts/train_ifvg_4class.py --records results/run_xyz/records.jsonl
@@ -398,4 +398,4 @@ After simulation testing:
 - **Data Loader**: `src/data/loader.py`
 - **Replay Engine**: `src/components/UnifiedReplayView.tsx`
 - **OCO Logic**: `src/policy/oco_policy.py`
-- **Examples**: `scripts/run_*.py`
+- **Examples**: `scripts/backtest_*.py`, `scripts/session_*.py`

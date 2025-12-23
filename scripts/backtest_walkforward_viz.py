@@ -4,7 +4,7 @@ Walk-Forward Viz Export CLI
 Run walk-forward experiments and export visualization artifacts.
 
 Usage:
-    python scripts/run_walkforward_viz.py --config experiment.json --out results/viz/my_run/
+    python scripts/backtest_walkforward_viz.py --config experiment.json --out results/viz/my_run/
 """
 
 import sys

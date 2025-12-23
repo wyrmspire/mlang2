@@ -9,7 +9,7 @@ Theory: Volume confirms breakouts.
 Custom indicator: RVAP = current volume / 20-bar average volume
 
 Usage:
-    python scripts/run_rvap_scan.py --days 7
+    python scripts/backtest_rvap.py --days 7
 """
 
 import sys

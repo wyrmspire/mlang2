@@ -10,7 +10,7 @@ Target: 2R
 Hypothesis: Candle-range stop adapts faster than ATR.
 
 Run:
-    python scripts/run_lowvol_breakout.py --days 7
+    python scripts/backtest_lowvol_breakout.py --days 7
 """
 
 import sys

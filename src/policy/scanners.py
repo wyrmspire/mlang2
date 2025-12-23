@@ -225,7 +225,7 @@ class ScriptScanner(Scanner):
     
     Example:
         scanner = ScriptScanner(
-            script_path="scripts/run_lunch_fade.py",
+            script_path="scripts/backtest_lunch_fade.py",
             script_kwargs={'stop_atr_mult': 0.5}
         )
     """
@@ -237,7 +237,7 @@ class ScriptScanner(Scanner):
     ):
         """
         Args:
-            script_path: Path to Python script (e.g., 'scripts/run_lunch_fade.py')
+            script_path: Path to Python script (e.g., 'scripts/backtest_lunch_fade.py')
             script_kwargs: Optional kwargs to pass to the script's scan/get_signals function
         """
         self.script_path = script_path
