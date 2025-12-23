@@ -28,7 +28,7 @@ export const UnifiedReplayView: React.FC<UnifiedReplayViewProps> = ({
 }) => {
     // Data Source
     const [dataSourceMode, setDataSourceMode] = useState<DataSourceMode>('SIMULATION');
-    
+
     // Playback State
     const [playbackState, setPlaybackState] = useState<PlaybackState>('STOPPED');
     const [speed, setSpeed] = useState(200); // ms per bar
@@ -36,7 +36,7 @@ export const UnifiedReplayView: React.FC<UnifiedReplayViewProps> = ({
     const [currentIndex, setCurrentIndex] = useState(0);
     const [startIndex, setStartIndex] = useState(0);
     const [status, setStatus] = useState('Ready');
-    
+
     // Model/Scanner Selection
     const [selectedModel, setSelectedModel] = useState('models/ifvg_4class_cnn.pth');
     const [selectedScanner, setSelectedScanner] = useState('ifvg_4class');
@@ -45,7 +45,7 @@ export const UnifiedReplayView: React.FC<UnifiedReplayViewProps> = ({
         'models/ifvg_cnn.pth',
         'models/best_model.pth'
     ]);
-    
+
     // OCO State
     const [ocoState, setOcoState] = useState<{
         entry: number;
@@ -54,32 +54,35 @@ export const UnifiedReplayView: React.FC<UnifiedReplayViewProps> = ({
         startTime: number;
         direction: 'LONG' | 'SHORT';
     } | null>(null);
-    
+
     // Trade Settings
     const [threshold, setThreshold] = useState(0.35);
     const [stopAtr, setStopAtr] = useState(2.0);
     const [tpAtr, setTpAtr] = useState(4.0);
-    
+
     // Trade Tracking
     const [triggers, setTriggers] = useState(0);
     const [wins, setWins] = useState(0);
     const [losses, setLosses] = useState(0);
     const [completedTrades, setCompletedTrades] = useState<VizTrade[]>([]);
     const [completedDecisions, setCompletedDecisions] = useState<VizDecision[]>([]);
-    
+
     // YFinance specific
     const [ticker, setTicker] = useState('MES=F');
     const [yfinanceDays, setYfinanceDays] = useState(7);
-    
+
     // Refs
     const intervalRef = useRef<NodeJS.Timeout | null>(null);
     const allBarsRef = useRef<BarData[]>([]);
     const ocoRef = useRef<typeof ocoState>(null);
     const completedTradesRef = useRef<VizTrade[]>([]);
     const completedDecisionsRef = useRef<VizDecision[]>([]);
+    const eventSourceRef = useRef<EventSource | null>(null);
+    const dataSourceModeRef = useRef<DataSourceMode>('SIMULATION');
 
     // Load data based on selected mode
     useEffect(() => {
+        dataSourceModeRef.current = dataSourceMode;
         loadData();
     }, [dataSourceMode, lastTradeTimestamp, runId, ticker, yfinanceDays]);
 
@@ -144,13 +147,89 @@ export const UnifiedReplayView: React.FC<UnifiedReplayViewProps> = ({
     const loadYFinanceData = async () => {
         // Start live YFinance session
         try {
+            // Close any existing connection
+            if (eventSourceRef.current) {
+                eventSourceRef.current.close();
+                eventSourceRef.current = null;
+            }
+
+            // Reset state for fresh start
+            allBarsRef.current = [];
+            setBars([]);
+            setCurrentIndex(0);
+            setStartIndex(0);
+            setOcoState(null);
+            ocoRef.current = null;
+            setTriggers(0);
+            setWins(0);
+            setLosses(0);
+            setCompletedTrades([]);
+            setCompletedDecisions([]);
+            completedTradesRef.current = [];
+            completedDecisionsRef.current = [];
+
             const session = await api.startLiveReplay(ticker, selectedScanner, yfinanceDays, 10.0);
             setStatus(`YFinance session started: ${session.session_id}`);
-            
-            // For now, we'll use the simulation approach but note this is YFinance mode
-            // In a full implementation, we'd stream from the YFinance session
-            await loadSimulationData(); // Temporary fallback
-            setStatus(`YFinance mode: ${ticker} (${yfinanceDays} days history)`);
+
+            // Connect to SSE stream
+            const es = new EventSource(`http://localhost:8000/replay/stream/${session.session_id}`);
+            eventSourceRef.current = es;
+
+            es.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+
+                    if (data.type === 'BAR') {
+                        const bar: BarData = {
+                            time: new Date(data.timestamp).getTime() / 1000,
+                            open: data.open,
+                            high: data.high,
+                            low: data.low,
+                            close: data.close,
+                            volume: data.volume || 0
+                        };
+                        allBarsRef.current.push(bar);
+                        setBars([...allBarsRef.current]);
+                        setCurrentIndex(allBarsRef.current.length - 1);
+
+                        // Process OCO exits (SL/TP hit checks)
+                        processBar(bar, allBarsRef.current.length - 1);
+                    } else if (data.type === 'OCO_OPEN' || (data.type === 'DECISION' && data.triggered)) {
+                        // Backend triggered a trade entry
+                        const newOco = {
+                            entry: data.entry_price || data.price,
+                            stop: data.stop_price,
+                            tp: data.tp_price,
+                            startTime: new Date(data.timestamp || Date.now()).getTime() / 1000,
+                            direction: data.direction as 'LONG' | 'SHORT'
+                        };
+                        ocoRef.current = newOco;
+                        setOcoState(newOco);
+                        setTriggers(prev => prev + 1);
+                    } else if (data.type === 'STATUS') {
+                        setStatus(data.message || 'YFinance streaming...');
+                    } else if (data.type === 'STREAM_END') {
+                        setStatus(`Stream ended (code: ${data.exit_code})`);
+                        es.close();
+                        eventSourceRef.current = null;
+                    } else if (data.type === 'ERROR') {
+                        setStatus(`Stream error: ${data.message}`);
+                        es.close();
+                        eventSourceRef.current = null;
+                    }
+                } catch (parseErr) {
+                    console.error('SSE parse error:', parseErr, event.data);
+                }
+            };
+
+            es.onerror = (err) => {
+                console.error('SSE connection error:', err);
+                setStatus('YFinance stream error - check console');
+                es.close();
+                eventSourceRef.current = null;
+            };
+
+            setStatus(`YFinance mode: ${ticker} (streaming...)`);
         } catch (e: any) {
             setStatus(`YFinance error: ${e.message}`);
         }
@@ -195,12 +274,12 @@ export const UnifiedReplayView: React.FC<UnifiedReplayViewProps> = ({
         // Rewind by 100 bars or to start
         const newIndex = Math.max(startIndex, currentIndex - 100);
         setCurrentIndex(newIndex);
-        
+
         // If playing, update bars
         if (playbackState === 'PLAYING' || playbackState === 'PAUSED') {
             setBars(allBarsRef.current.slice(startIndex, newIndex + 1));
         }
-        
+
         setStatus(`Rewound to bar ${newIndex}`);
     }, [currentIndex, startIndex, playbackState]);
 
@@ -208,11 +287,11 @@ export const UnifiedReplayView: React.FC<UnifiedReplayViewProps> = ({
         // Fast forward by 100 bars or to end
         const newIndex = Math.min(allBarsRef.current.length - 1, currentIndex + 100);
         setCurrentIndex(newIndex);
-        
+
         if (playbackState === 'PLAYING' || playbackState === 'PAUSED') {
             setBars(allBarsRef.current.slice(startIndex, newIndex + 1));
         }
-        
+
         setStatus(`Fast forwarded to bar ${newIndex}`);
     }, [currentIndex, startIndex, playbackState]);
 
@@ -345,8 +424,9 @@ export const UnifiedReplayView: React.FC<UnifiedReplayViewProps> = ({
             }
         }
 
-        // Model Trigger Logic (Entry)
-        if (!ocoRef.current && idx % 5 === 0 && idx >= 60) {
+        // Model Trigger Logic (Entry) - Only for SIMULATION mode
+        // In YFinance mode, the backend (run_live_mode.py) handles strategy triggering
+        if (dataSourceModeRef.current === 'SIMULATION' && !ocoRef.current && idx % 5 === 0 && idx >= 60) {
             const windowBars = allBarsRef.current.slice(Math.max(0, idx - 29), idx + 1);
             const recentBars = allBarsRef.current.slice(Math.max(0, idx - 13), idx + 1);
             const avgRange = recentBars.reduce((sum, b) => sum + (b.high - b.low), 0) / recentBars.length;
@@ -403,6 +483,10 @@ export const UnifiedReplayView: React.FC<UnifiedReplayViewProps> = ({
     useEffect(() => {
         return () => {
             if (intervalRef.current) clearInterval(intervalRef.current);
+            if (eventSourceRef.current) {
+                eventSourceRef.current.close();
+                eventSourceRef.current = null;
+            }
         };
     }, []);
 
@@ -458,18 +542,17 @@ export const UnifiedReplayView: React.FC<UnifiedReplayViewProps> = ({
                     {/* Playback Controls */}
                     <div className="mb-6">
                         <h3 className="text-xs font-bold text-green-400 uppercase mb-2">Playback</h3>
-                        
+
                         <div className="flex gap-2 mb-3">
                             <button
                                 onClick={handlePlayPause}
                                 disabled={allBarsRef.current.length === 0}
-                                className={`flex-1 font-bold py-2 px-3 rounded text-sm ${
-                                    allBarsRef.current.length === 0
-                                        ? 'bg-slate-700 text-slate-500 cursor-not-allowed'
-                                        : playbackState === 'PLAYING'
+                                className={`flex-1 font-bold py-2 px-3 rounded text-sm ${allBarsRef.current.length === 0
+                                    ? 'bg-slate-700 text-slate-500 cursor-not-allowed'
+                                    : playbackState === 'PLAYING'
                                         ? 'bg-yellow-600 hover:bg-yellow-500 text-white'
                                         : 'bg-green-600 hover:bg-green-500 text-white'
-                                }`}
+                                    }`}
                             >
                                 {playbackState === 'PLAYING' ? '⏸ Pause' : '▶ Play'}
                             </button>
