@@ -190,14 +190,41 @@ export const api = {
         return response.json();
     },
 
-    startLiveReplay: async (ticker: string = "MES=F", strategy: string = "ema_cross", days: number = 7, speed: number = 10.0): Promise<any> => {
+    startLiveReplay: async (
+        ticker: string = "MES=F",
+        strategy: string = "ema_cross",
+        days: number = 7,
+        speed: number = 10.0,
+        entryConfig?: {
+            entry_type?: 'market' | 'limit';
+            stop_method?: 'atr' | 'swing' | 'fixed_bars';
+            tp_method?: 'atr' | 'r_multiple';
+            stop_atr?: number;
+            tp_atr?: number;
+            tp_r?: number;
+        }
+    ): Promise<any> => {
         const hasBackend = await checkBackend();
         if (!hasBackend) throw new Error('Backend unavailable');
+
+        const body = {
+            ticker,
+            strategy,
+            days,
+            speed,
+            // Entry scan config (defaults handled by backend)
+            entry_type: entryConfig?.entry_type || 'market',
+            stop_method: entryConfig?.stop_method || 'atr',
+            tp_method: entryConfig?.tp_method || 'atr',
+            stop_atr: entryConfig?.stop_atr || 1.0,
+            tp_atr: entryConfig?.tp_atr || 2.0,
+            tp_r: entryConfig?.tp_r || 2.0
+        };
 
         const response = await fetch(`${API_BASE}/replay/start/live`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ ticker, strategy, days, speed })
+            body: JSON.stringify(body)
         });
 
         if (!response.ok) {

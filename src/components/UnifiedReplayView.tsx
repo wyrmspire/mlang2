@@ -37,14 +37,21 @@ export const UnifiedReplayView: React.FC<UnifiedReplayViewProps> = ({
     const [startIndex, setStartIndex] = useState(0);
     const [status, setStatus] = useState('Ready');
 
-    // Model/Scanner Selection
+    // Model/Scanner Selection - Now with enable checkboxes (OFF by default)
+    const [useCnnModel, setUseCnnModel] = useState(false);       // OFF by default
+    const [usePatternScanner, setUsePatternScanner] = useState(false); // OFF by default
     const [selectedModel, setSelectedModel] = useState('models/ifvg_4class_cnn.pth');
-    const [selectedScanner, setSelectedScanner] = useState('ifvg_4class');
+    const [selectedScanner, setSelectedScanner] = useState('ifvg');
     const [availableModels, setAvailableModels] = useState<string[]>([
         'models/ifvg_4class_cnn.pth',
         'models/ifvg_cnn.pth',
         'models/best_model.pth'
     ]);
+
+    // Entry Configuration (sent to backend)
+    const [entryType, setEntryType] = useState<'market' | 'limit'>('market');
+    const [stopMethod, setStopMethod] = useState<'atr' | 'swing' | 'fixed_bars'>('atr');
+    const [tpMethod, setTpMethod] = useState<'atr' | 'r_multiple'>('atr');
 
     // OCO State
     const [ocoState, setOcoState] = useState<{
@@ -168,7 +175,13 @@ export const UnifiedReplayView: React.FC<UnifiedReplayViewProps> = ({
             completedTradesRef.current = [];
             completedDecisionsRef.current = [];
 
-            const session = await api.startLiveReplay(ticker, selectedScanner, yfinanceDays, 10.0);
+            const session = await api.startLiveReplay(ticker, selectedScanner, yfinanceDays, 10.0, {
+                entry_type: entryType,
+                stop_method: stopMethod,
+                tp_method: tpMethod,
+                stop_atr: stopAtr,
+                tp_atr: tpAtr
+            });
             setStatus(`YFinance session started: ${session.session_id}`);
 
             // Connect to SSE stream
@@ -424,9 +437,9 @@ export const UnifiedReplayView: React.FC<UnifiedReplayViewProps> = ({
             }
         }
 
-        // Model Trigger Logic (Entry) - Only for SIMULATION mode
+        // Model Trigger Logic (Entry) - Only for SIMULATION mode with CNN enabled
         // In YFinance mode, the backend (run_live_mode.py) handles strategy triggering
-        if (dataSourceModeRef.current === 'SIMULATION' && !ocoRef.current && idx % 5 === 0 && idx >= 60) {
+        if (dataSourceModeRef.current === 'SIMULATION' && useCnnModel && !ocoRef.current && idx % 5 === 0 && idx >= 60) {
             const windowBars = allBarsRef.current.slice(Math.max(0, idx - 29), idx + 1);
             const recentBars = allBarsRef.current.slice(Math.max(0, idx - 13), idx + 1);
             const avgRange = recentBars.reduce((sum, b) => sum + (b.high - b.low), 0) / recentBars.length;
@@ -642,34 +655,123 @@ export const UnifiedReplayView: React.FC<UnifiedReplayViewProps> = ({
                         </div>
                     )}
 
-                    {/* Model Selection */}
+                    {/* Model Selection - Checkbox + Dropdown */}
                     <div className="mb-6">
-                        <h3 className="text-xs font-bold text-cyan-400 uppercase mb-2">Model & Scanner</h3>
+                        <h3 className="text-xs font-bold text-cyan-400 uppercase mb-2">Trigger Sources</h3>
+
+                        {/* CNN Model Checkbox */}
                         <div className="mb-3">
-                            <label className="text-xs text-slate-400">Model</label>
+                            <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer">
+                                <input
+                                    type="checkbox"
+                                    checked={useCnnModel}
+                                    onChange={e => setUseCnnModel(e.target.checked)}
+                                    disabled={playbackState === 'PLAYING'}
+                                    className="w-4 h-4"
+                                />
+                                Use CNN Model
+                            </label>
+                            {useCnnModel && (
+                                <select
+                                    value={selectedModel}
+                                    onChange={e => setSelectedModel(e.target.value)}
+                                    disabled={playbackState === 'PLAYING'}
+                                    className="w-full mt-1 bg-slate-900 border border-slate-600 rounded px-2 py-1 text-sm text-white"
+                                >
+                                    {availableModels.map(model => (
+                                        <option key={model} value={model}>{model.split('/').pop()}</option>
+                                    ))}
+                                </select>
+                            )}
+                        </div>
+
+                        {/* Pattern Scanner Checkbox */}
+                        <div className="mb-3">
+                            <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer">
+                                <input
+                                    type="checkbox"
+                                    checked={usePatternScanner}
+                                    onChange={e => setUsePatternScanner(e.target.checked)}
+                                    disabled={playbackState === 'PLAYING'}
+                                    className="w-4 h-4"
+                                />
+                                Use Pattern Scanner
+                            </label>
+                            {usePatternScanner && (
+                                <select
+                                    value={selectedScanner}
+                                    onChange={e => setSelectedScanner(e.target.value)}
+                                    disabled={playbackState === 'PLAYING'}
+                                    className="w-full mt-1 bg-slate-900 border border-slate-600 rounded px-2 py-1 text-sm text-white"
+                                >
+                                    <option value="ifvg">IFVG</option>
+                                    <option value="ema_cross">EMA Cross</option>
+                                    <option value="ema_bounce">EMA Bounce</option>
+                                </select>
+                            )}
+                        </div>
+
+                        {useCnnModel && usePatternScanner && (
+                            <p className="text-xs text-yellow-400 mt-1">⚠ Both enabled: requires BOTH to trigger (AND)</p>
+                        )}
+                    </div>
+
+                    {/* Entry Configuration */}
+                    <div className="mb-6">
+                        <h3 className="text-xs font-bold text-purple-400 uppercase mb-2">Entry Configuration</h3>
+
+                        <div className="mb-3">
+                            <label className="text-xs text-slate-400">Entry Type</label>
+                            <div className="flex gap-3 mt-1">
+                                <label className="flex items-center gap-1 text-xs text-slate-300 cursor-pointer">
+                                    <input
+                                        type="radio"
+                                        name="entryType"
+                                        value="market"
+                                        checked={entryType === 'market'}
+                                        onChange={() => setEntryType('market')}
+                                        disabled={playbackState === 'PLAYING'}
+                                    />
+                                    Market
+                                </label>
+                                <label className="flex items-center gap-1 text-xs text-slate-300 cursor-pointer">
+                                    <input
+                                        type="radio"
+                                        name="entryType"
+                                        value="limit"
+                                        checked={entryType === 'limit'}
+                                        onChange={() => setEntryType('limit')}
+                                        disabled={playbackState === 'PLAYING'}
+                                    />
+                                    Limit
+                                </label>
+                            </div>
+                        </div>
+
+                        <div className="mb-3">
+                            <label className="text-xs text-slate-400">Stop Placement</label>
                             <select
-                                value={selectedModel}
-                                onChange={e => setSelectedModel(e.target.value)}
+                                value={stopMethod}
+                                onChange={e => setStopMethod(e.target.value as any)}
                                 disabled={playbackState === 'PLAYING'}
                                 className="w-full bg-slate-900 border border-slate-600 rounded px-2 py-1 text-sm text-white"
                             >
-                                {availableModels.map(model => (
-                                    <option key={model} value={model}>{model.split('/').pop()}</option>
-                                ))}
+                                <option value="atr">ATR Multiple</option>
+                                <option value="swing">Behind Swing</option>
+                                <option value="fixed_bars">Fixed Bars</option>
                             </select>
                         </div>
+
                         <div className="mb-3">
-                            <label className="text-xs text-slate-400">Scanner/Strategy</label>
+                            <label className="text-xs text-slate-400">Take Profit</label>
                             <select
-                                value={selectedScanner}
-                                onChange={e => setSelectedScanner(e.target.value)}
+                                value={tpMethod}
+                                onChange={e => setTpMethod(e.target.value as any)}
                                 disabled={playbackState === 'PLAYING'}
                                 className="w-full bg-slate-900 border border-slate-600 rounded px-2 py-1 text-sm text-white"
                             >
-                                <option value="ifvg_4class">IFVG 4-Class</option>
-                                <option value="ifvg">IFVG</option>
-                                <option value="ema_cross">EMA Cross</option>
-                                <option value="ema_bounce">EMA Bounce</option>
+                                <option value="atr">ATR Multiple</option>
+                                <option value="r_multiple">R-Multiple</option>
                             </select>
                         </div>
                     </div>

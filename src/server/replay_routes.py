@@ -42,6 +42,14 @@ class LiveReplayRequest(BaseModel):
     strategy: str = "ema_cross"
     days: int = 7
     speed: float = 10.0
+    
+    # Entry scan configuration
+    entry_type: str = "market"      # 'market' or 'limit'
+    stop_method: str = "atr"        # 'atr', 'swing', 'fixed_bars'
+    tp_method: str = "atr"          # 'atr', 'r_multiple'
+    stop_atr: float = 1.0
+    tp_atr: float = 2.0
+    tp_r: float = 2.0
 
 
 @router.post("/start/live")
@@ -56,7 +64,13 @@ async def start_live_replay(request: LiveReplayRequest) -> Dict[str, Any]:
         "--ticker", request.ticker,
         "--strategy", request.strategy,
         "--days", str(request.days),
-        "--speed", str(request.speed)
+        "--speed", str(request.speed),
+        "--entry-type", request.entry_type,
+        "--stop-method", request.stop_method,
+        "--tp-method", request.tp_method,
+        "--stop-atr", str(request.stop_atr),
+        "--tp-atr", str(request.tp_atr),
+        "--tp-r", str(request.tp_r)
     ]
     
     # Start subprocess
