@@ -191,27 +191,15 @@ const App: React.FC = () => {
               🔬 Lab
             </button>
           </div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => {
-                setSimulationMode('YFINANCE');
-                setShowSimulation(true);
-              }}
-              className="bg-red-600 hover:bg-red-500 text-white text-xs px-2 py-1 rounded animate-pulse font-bold"
-              title="Open Live Trading Dashboard"
-            >
-              🔴 LIVE
-            </button>
-            <button
-              onClick={() => {
-                setSimulationMode('SIMULATION');
-                setShowSimulation(true);
-              }}
-              className="bg-purple-600 hover:bg-purple-500 text-white text-xs px-3 py-1 rounded"
-            >
-              ▶ Replay
-            </button>
-          </div>
+          <button
+            onClick={() => {
+              setSimulationMode('SIMULATION');
+              setShowSimulation(true);
+            }}
+            className="bg-purple-600 hover:bg-purple-500 text-white text-xs px-3 py-1 rounded"
+          >
+            ▶ Replay
+          </button>
         </div>
 
         <RunPicker onSelect={setCurrentRun} />

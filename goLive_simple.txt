@@ -1,0 +1,114 @@
+// Simple working goLive - connects to backend SSE stream and displays bars as they come
+const goLive = async () => {
+    setStatus('Connecting to live feed...');
+    try {
+        // Close any existing connection
+        if (eventSourceRef.current) {
+            eventSourceRef.current.close();
+            eventSourceRef.current = null;
+        }
+        if (intervalRef.current) {
+            clearInterval(intervalRef.current);
+            intervalRef.current = null;
+        }
+
+        const session = await api.startLiveReplay(ticker, selectedScanner, yfinanceDays, 10.0, {
+            entry_type: entryType,
+            stop_method: stopMethod,
+            tp_method: tpMethod,
+            stop_atr: stopAtr,
+            tp_atr: tpAtr
+        });
+        setStatus(`Live session started: ${session.session_id}`);
+
+        // Connect to SSE stream for continuous updates
+        const es = new EventSource(`http://localhost:8000/replay/stream/${session.session_id}`);
+        eventSourceRef.current = es;
+        setIsLiveStreaming(true);
+        setPlaybackState('PLAYING');
+
+        es.onmessage = (event) => {
+            try {
+                // Skip non-JSON lines
+                if (!event.data.startsWith('{')) {
+                    console.log('[SSE debug]', event.data);
+                    return;
+                }
+
+                const data = JSON.parse(event.data);
+
+                if (data.type === 'HISTORY') {
+                    // Bulk load history - show all at once
+                    const historyBars: BarData[] = data.bars.map((b: any) => ({
+                        time: new Date(b.timestamp).getTime() / 1000,
+                        open: b.open,
+                        high: b.high,
+                        low: b.low,
+                        close: b.close,
+                        volume: b.volume || 0
+                    }));
+                    allBarsRef.current = historyBars;
+                    setBars(historyBars);
+                    setCurrentIndex(historyBars.length - 1);
+                    setStartIndex(0);
+                    setStatus(`Live: ${historyBars.length} bars loaded. Waiting for new bars...`);
+                } else if (data.type === 'BAR') {
+                    const bar: BarData = {
+                        time: new Date(data.timestamp).getTime() / 1000,
+                        open: data.open,
+                        high: data.high,
+                        low: data.low,
+                        close: data.close,
+                        volume: data.volume || 0
+                    };
+                    allBarsRef.current.push(bar);
+                    setBars([...allBarsRef.current]);
+                    setCurrentIndex(allBarsRef.current.length - 1);
+
+                    // Process OCO exits and run scanner
+                    processBar(bar, allBarsRef.current.length - 1);
+                } else if (data.type === 'OCO_OPEN' || (data.type === 'DECISION' && data.triggered)) {
+                    // Backend triggered a trade entry
+                    const newOco = {
+                        entry: data.entry_price || data.price,
+                        stop: data.stop_price,
+                        tp: data.tp_price,
+                        startTime: new Date(data.timestamp || Date.now()).getTime() / 1000,
+                        direction: data.direction as 'LONG' | 'SHORT'
+                    };
+                    ocoRef.current = newOco;
+                    setOcoState(newOco);
+                    setTriggers(prev => prev + 1);
+                } else if (data.type === 'STATUS') {
+                    setStatus(data.message || 'Live streaming...');
+                } else if (data.type === 'STREAM_END') {
+                    setStatus(`Stream ended (code: ${data.exit_code})`);
+                    es.close();
+                    eventSourceRef.current = null;
+                    setIsLiveStreaming(false);
+                    setPlaybackState('STOPPED');
+                } else if (data.type === 'ERROR') {
+                    setStatus(`Stream error: ${data.message}`);
+                    es.close();
+                    eventSourceRef.current = null;
+                    setIsLiveStreaming(false);
+                    setPlaybackState('STOPPED');
+                }
+            } catch (parseErr) {
+                console.error('SSE parse error:', parseErr, event.data);
+            }
+        };
+
+        es.onerror = (err) => {
+            console.error('SSE connection error:', err);
+            setStatus('Live stream error - check console');
+            es.close();
+            eventSourceRef.current = null;
+            setIsLiveStreaming(false);
+            setPlaybackState('STOPPED');
+        };
+    } catch (e: any) {
+        setStatus(`Live error: ${e.message}`);
+        setIsLiveStreaming(false);
+    }
+};

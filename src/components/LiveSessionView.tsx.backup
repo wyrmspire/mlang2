@@ -269,137 +269,188 @@ export const LiveSessionView: React.FC<LiveSessionViewProps> = ({
         }
     };
 
-    // Ref for polling interval separate from playback interval
-    const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
-
+    // Go Live: Fetch fresh data, show all bars, poll for updates
     const goLive = async () => {
-        if (allBarsRef.current.length === 0) {
-            setStatus('No bars loaded. Switch to YFinance mode first.');
-            return;
-        }
-
-        // Close any existing intervals
-        if (intervalRef.current) {
-            clearInterval(intervalRef.current);
-            intervalRef.current = null;
-        }
-        if (pollIntervalRef.current) {
-            clearInterval(pollIntervalRef.current);
-            pollIntervalRef.current = null;
-        }
-
-        // Show ALL bars immediately
-        setBars([...allBarsRef.current]);
-        setCurrentIndex(allBarsRef.current.length - 1);
-        setIsLiveStreaming(true);
-        setPlaybackState('PLAYING');
-
-        const lastBar = allBarsRef.current[allBarsRef.current.length - 1];
-        const lastTime = new Date(lastBar.time * 1000).toLocaleTimeString();
-        setStatus(`Live: ${allBarsRef.current.length} bars. Last: ${lastTime}. Running CNN...`);
-
-        // Run CNN on all bars in background (fast, 10ms per bar)
-        let processIdx = 60;
-        const processInterval = setInterval(() => {
-            if (processIdx >= allBarsRef.current.length) {
-                clearInterval(processInterval);
-                setStatus(`Live: Waiting for new candle... (Last: ${lastTime})`);
-                return;
+        setStatus('Fetching fresh live data...');
+        try {
+            // Close any existing connections
+            if (eventSourceRef.current) {
+                eventSourceRef.current.close();
+                eventSourceRef.current = null;
             }
-            processBar(allBarsRef.current[processIdx], processIdx);
-            processIdx++;
-        }, 10);
-
-        // Start a "waiting" playback loop - it will just wait at the end
-        let idx = allBarsRef.current.length;
-        intervalRef.current = setInterval(() => {
-            if (idx >= allBarsRef.current.length) {
-                // Waiting for new bars - the poll will push them
-                return;
+            if (intervalRef.current) {
+                clearInterval(intervalRef.current);
+                intervalRef.current = null;
             }
-            // New bar arrived! Display it
-            const bar = allBarsRef.current[idx];
-            setBars(prev => [...prev, bar]);
-            setCurrentIndex(idx);
-            processBar(bar, idx);
 
-            const newLastTime = new Date(bar.time * 1000).toLocaleTimeString();
-            setStatus(`Live: New bar! Total: ${allBarsRef.current.length}. Last: ${newLastTime}`);
-            idx++;
-        }, 200); // Check every 200ms for new bars
+            // ALWAYS fetch fresh data
+            const session = await api.startLiveReplay(ticker, selectedScanner, yfinanceDays, 10.0, {
+                entry_type: entryType,
+                stop_method: stopMethod,
+                tp_method: tpMethod,
+                stop_atr: stopAtr,
+                tp_atr: tpAtr
+            });
 
-        // Poll for new bars every 60 seconds
-        console.log('[Go Live] Starting 60-second poll');
-        pollIntervalRef.current = setInterval(async () => {
-            console.log('[Poll]', new Date().toLocaleTimeString());
-            try {
-                const session = await api.startLiveReplay(ticker, selectedScanner, 1, 10.0, {
-                    entry_type: entryType,
-                    stop_method: stopMethod,
-                    tp_method: tpMethod,
-                    stop_atr: stopAtr,
-                    tp_atr: tpAtr
-                });
-                console.log('[Poll] Created session:', session.session_id);
+            // Fetch history via SSE
+            const es = new EventSource(`http://localhost:8000/replay/stream/${session.session_id}`);
 
-                const es = new EventSource(`http://localhost:8000/replay/stream/${session.session_id}`);
-                console.log('[Poll] SSE connecting...');
-
-                es.onopen = () => console.log('[Poll] SSE connected');
-
+            const loadPromise = new Promise<boolean>((resolve) => {
                 es.onmessage = (event) => {
-                    console.log('[Poll] SSE message received:', event.data.substring(0, 50));
-                    if (!event.data.startsWith('{')) return;
+                    if (!event.data.startsWith('{')) {
+                        console.log('[SSE debug]', event.data);
+                        return;
+                    }
+
                     try {
                         const data = JSON.parse(event.data);
-                        if (data.type === 'HISTORY' && data.bars && data.bars.length > 0) {
-                            const latestTime = allBarsRef.current[allBarsRef.current.length - 1]?.time || 0;
-                            const newBars: BarData[] = data.bars
-                                .map((b: any) => ({
-                                    time: new Date(b.timestamp).getTime() / 1000,
-                                    open: b.open,
-                                    high: b.high,
-                                    low: b.low,
-                                    close: b.close,
-                                    volume: b.volume || 0
-                                }))
-                                .filter((b: BarData) => b.time > latestTime);
 
-                            if (newBars.length > 0) {
-                                console.log('[Poll] Found', newBars.length, 'new bars - pushing to ref');
-                                // Just push to ref - the playback loop will pick them up
-                                newBars.forEach((bar: BarData) => {
-                                    allBarsRef.current.push(bar);
-                                });
-                            } else {
-                                console.log('[Poll] No new bars');
-                            }
+                        if (data.type === 'HISTORY') {
+                            const historyBars: BarData[] = data.bars.map((b: any) => ({
+                                time: new Date(b.timestamp).getTime() / 1000,
+                                open: b.open,
+                                high: b.high,
+                                low: b.low,
+                                close: b.close,
+                                volume: b.volume || 0
+                            }));
+
+                            console.log('[Go Live] Loaded', historyBars.length, 'bars');
+
+                            // Store and display ALL bars immediately
+                            allBarsRef.current = historyBars;
+                            setBars(historyBars);
+                            setCurrentIndex(historyBars.length - 1);
+                            setStartIndex(0);
+                            setIsLiveStreaming(true);
+                            setPlaybackState('PLAYING');
+
+                            const lastBar = historyBars[historyBars.length - 1];
+                            const lastTime = new Date(lastBar.time * 1000).toLocaleTimeString();
+                            setStatus(`Live: ${historyBars.length} bars. Last: ${lastTime}. Polling...`);
+
+                            // Run CNN on all bars (background)
+                            let processIdx = 60;
+                            const processInterval = setInterval(() => {
+                                if (processIdx >= historyBars.length) {
+                                    clearInterval(processInterval);
+                                    return;
+                                }
+                                processBar(historyBars[processIdx], processIdx);
+                                processIdx++;
+                            }, 10);
+
                             es.close();
                             api.stopReplay(session.session_id).catch(() => { });
+                            resolve(true);
+                        } else if (data.type === 'ERROR') {
+                            setStatus(`Error: ${data.message}`);
+                            es.close();
+                            resolve(false);
                         }
-                    } catch { }
+                    } catch (parseErr) {
+                        console.error('SSE parse error:', parseErr);
+                    }
                 };
 
-                es.onerror = () => es.close();
+                es.onerror = () => {
+                    setStatus('Failed to fetch live data');
+                    es.close();
+                    resolve(false);
+                };
+
                 setTimeout(() => {
                     if (es.readyState !== EventSource.CLOSED) {
                         es.close();
-                        api.stopReplay(session.session_id).catch(() => { });
+                        setStatus('Timeout loading data');
+                        resolve(false);
                     }
-                }, 10000);
-            } catch (e) {
-                console.error('[Poll] Error:', e);
+                }, 30000);
+            });
+
+            const success = await loadPromise;
+            if (!success) {
+                setIsLiveStreaming(false);
+                return;
             }
-        }, 60000);
+
+            // Set up polling for new bars every 60 seconds
+            console.log('[Go Live] Starting 60-second poll');
+            intervalRef.current = setInterval(async () => {
+                console.log('[Poll]', new Date().toLocaleTimeString());
+                console.log('[Poll] Checking for new bars at', new Date().toLocaleTimeString());
+                try {
+                    // Fetch fresh data and check for new bars
+                    const session = await api.startLiveReplay(ticker, selectedScanner, 1, 10.0, {
+                        entry_type: entryType,
+                        stop_method: stopMethod,
+                        tp_method: tpMethod,
+                        stop_atr: stopAtr,
+                        tp_atr: tpAtr
+                    });
+
+                    // Quick SSE connect just to get HISTORY then close
+                    const es = new EventSource(`http://localhost:8000/replay/stream/${session.session_id}`);
+
+                    es.onmessage = (event) => {
+                        if (!event.data.startsWith('{')) return;
+                        try {
+                            const data = JSON.parse(event.data);
+                            if (data.type === 'HISTORY' && data.bars && data.bars.length > 0) {
+                                // Check if we have new bars
+                                const latestTime = allBarsRef.current[allBarsRef.current.length - 1]?.time || 0;
+                                const newBars: BarData[] = data.bars
+                                    .map((b: any) => ({
+                                        time: new Date(b.timestamp).getTime() / 1000,
+                                        open: b.open,
+                                        high: b.high,
+                                        low: b.low,
+                                        close: b.close,
+                                        volume: b.volume || 0
+                                    }))
+                                    .filter((b: BarData) => b.time > latestTime);
+
+                                if (newBars.length > 0) {
+                                    newBars.forEach((bar: BarData) => {
+                                        allBarsRef.current.push(bar);
+                                        processBar(bar, allBarsRef.current.length - 1);
+                                    });
+                                    setBars([...allBarsRef.current]);
+                                    setCurrentIndex(allBarsRef.current.length - 1);
+                                    setStatus(`Live: +${newBars.length} new bar(s). Total: ${allBarsRef.current.length}`);
+                                } else {
+                                    const now = new Date().toLocaleTimeString();
+                                    setStatus(`Live: No new bars at ${now}. Total: ${allBarsRef.current.length}`);
+                                }
+                                es.close();
+                                api.stopReplay(session.session_id).catch(() => { });
+                            }
+                        } catch { }
+                    };
+
+                    es.onerror = () => es.close();
+
+                    // Auto-close after 10 seconds if no response
+                    setTimeout(() => {
+                        if (es.readyState !== EventSource.CLOSED) {
+                            es.close();
+                            api.stopReplay(session.session_id).catch(() => { });
+                        }
+                    }, 10000);
+
+                } catch (e) {
+                    console.error('Poll error:', e);
+                }
+            }, 60000); // Poll every 60 seconds
+
+        } catch (e: any) {
+            setStatus(`Live error: ${e.message}`);
+            setIsLiveStreaming(false);
+        }
     };
 
 
     const handlePlayPause = useCallback(async () => {
-        // In live streaming mode, Play/Pause has no effect - use Stop to exit
-        if (isLiveStreaming) {
-            return;
-        }
-
         if (playbackState === 'PLAYING') {
             // Pause
             if (intervalRef.current) {
@@ -417,16 +468,12 @@ export const LiveSessionView: React.FC<LiveSessionViewProps> = ({
             // Play or Resume - same behavior for both Simulation and YFinance
             startPlayback();
         }
-    }, [playbackState, currentIndex, startIndex, dataSourceMode, isLiveStreaming]);
+    }, [playbackState, currentIndex, startIndex, dataSourceMode]);
 
     const handleStop = useCallback(() => {
         if (intervalRef.current) {
             clearInterval(intervalRef.current);
             intervalRef.current = null;
-        }
-        if (pollIntervalRef.current) {
-            clearInterval(pollIntervalRef.current);
-            pollIntervalRef.current = null;
         }
         if (eventSourceRef.current) {
             eventSourceRef.current.close();
@@ -522,15 +569,6 @@ export const LiveSessionView: React.FC<LiveSessionViewProps> = ({
 
         intervalRef.current = setInterval(() => {
             if (idx >= allBarsRef.current.length) {
-                // In YFinance mode: Wait for new bars instead of stopping
-                if (dataSourceModeRef.current === 'YFINANCE') {
-                    const lastBar = allBarsRef.current[allBarsRef.current.length - 1];
-                    const lastTime = lastBar ? new Date(lastBar.time * 1000).toLocaleTimeString() : 'N/A';
-                    setStatus(`Live: Waiting for new candle... (Last: ${lastTime})`);
-                    return; // Skip this tick, but keep interval alive!
-                }
-
-                // In Simulation mode: Stop as usual
                 if (intervalRef.current) {
                     clearInterval(intervalRef.current);
                     intervalRef.current = null;
@@ -781,7 +819,6 @@ export const LiveSessionView: React.FC<LiveSessionViewProps> = ({
     useEffect(() => {
         return () => {
             if (intervalRef.current) clearInterval(intervalRef.current);
-            if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
             if (eventSourceRef.current) {
                 eventSourceRef.current.close();
                 eventSourceRef.current = null;

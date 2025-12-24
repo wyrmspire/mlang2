@@ -3,12 +3,13 @@ import { VizDecision, VizTrade, RunManifest, AgentResponse, ChatMessage, Continu
 // API base URL - auto-detect port (8000 or 8001)
 let API_BASE = import.meta.env.VITE_API_URL || '';
 
-// Flag to track if backend is available
+// Flag to track if backend is available - only cache success, always retry on failure
 let backendAvailable: boolean | null = null;
 
 // Check backend availability, auto-detecting port if needed
 async function checkBackend(): Promise<boolean> {
-    if (backendAvailable !== null) return backendAvailable;
+    // Only cache success - if previously failed, try again
+    if (backendAvailable === true) return true;
 
     // If no explicit URL, try both ports
     if (!API_BASE) {
