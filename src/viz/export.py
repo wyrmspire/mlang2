@@ -17,7 +17,7 @@ from src.viz.schema import (
 from src.viz.config import VizConfig
 from src.datasets.decision_record import DecisionRecord
 from src.datasets.trade_record import TradeRecord
-from src.sim.oco import OCOBracket
+from src.sim.oco_engine import OCOBracket
 from src.features.pipeline import FeatureBundle
 
 
@@ -154,14 +154,20 @@ class Exporter:
     
     def on_bracket_created(self, decision_id: str, bracket: OCOBracket):
         """Record OCO bracket creation."""
+        # Use getattr for compatibility with both legacy oco.py and unified oco_engine.py
+        # oco_engine.py doesn't have reference/reference_value fields
+        reference_attr = getattr(bracket.config, 'reference', None)
+        reference_type = reference_attr.value if reference_attr else "PRICE"
+        reference_value = getattr(bracket, 'reference_value', 0.0)
+        
         viz_oco = VizOCO(
             entry_price=bracket.entry_price,
             stop_price=bracket.stop_price,
             tp_price=bracket.tp_price,
             entry_type=bracket.config.entry_type,
             direction=bracket.config.direction,
-            reference_type=bracket.config.reference.value,
-            reference_value=bracket.reference_value,
+            reference_type=reference_type,
+            reference_value=reference_value,
             atr_at_creation=bracket.atr_at_creation,
             max_bars=bracket.config.max_bars,
             stop_atr=bracket.config.stop_atr,
@@ -261,11 +267,13 @@ class Exporter:
             wins = sum(1 for t in split_trades if t.outcome == 'WIN')
             split.win_rate = wins / len(split_trades) if split_trades else 0.0
         
-        # Build run summary
+        # Build run summary - use timezone-aware datetime for contract compliance
+        from datetime import timezone
+        now_utc = datetime.now(timezone.utc)
         run = VizRun(
             run_id=self.run_id,
             fingerprint=self._compute_fingerprint(),
-            created_at=datetime.now().isoformat(),
+            created_at=now_utc.isoformat(),
             config=self.experiment_config,
             splits=self.splits,
             total_decisions=len(self.decisions),
@@ -297,10 +305,12 @@ class Exporter:
             with open(series_path, 'w') as f:
                 json.dump(self.full_series.to_dict(), f, default=str)
         
-        # Write manifest.json
+        # Write manifest.json - includes required 'strategy' field for contract compliance
+        strategy_name = self.experiment_config.get('trigger', {}).get('trigger_id', 'unknown')
         manifest = {
             'run_id': self.run_id,
-            'created_at': run.created_at,
+            'created_at': now_utc.isoformat(),
+            'strategy': strategy_name,
             'files': {
                 'run': 'run.json',
                 'decisions': 'decisions.jsonl',

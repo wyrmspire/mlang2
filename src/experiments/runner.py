@@ -21,7 +21,7 @@ from src.data.loader import load_continuous_contract
 from src.data.resample import resample_all_timeframes
 
 from src.sim.stepper import MarketStepper
-from src.sim.oco import create_oco_bracket
+from src.sim.oco_engine import create_oco_bracket
 from src.features.pipeline import compute_features, precompute_indicators
 from src.policy.scanners import get_scanner
 from src.policy.filters import DEFAULT_FILTERS

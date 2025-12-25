@@ -10,7 +10,7 @@ from typing import Dict, Any, List, Optional
 
 from src.labels.future_window import FutureWindowProvider
 from src.labels.trade_outcome import TradeOutcome, compute_trade_outcome
-from src.sim.oco import OCOConfig, create_oco_bracket
+from src.sim.oco_engine import OCOConfig, create_oco_bracket
 from src.sim.bar_fill_model import BarFillConfig, BarFillEngine
 from src.sim.costs import CostModel, DEFAULT_COSTS
 

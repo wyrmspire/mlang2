@@ -1,7 +1,16 @@
 """
 OCO (One-Cancels-Other) Order Logic
 Bracket orders with entry, stop loss, and take profit.
+
+DEPRECATED: This module is deprecated. Use src.sim.oco_engine instead.
 """
+
+import warnings
+warnings.warn(
+    "src.sim.oco is deprecated. Use src.sim.oco_engine instead.",
+    DeprecationWarning,
+    stacklevel=2
+)
 
 from dataclasses import dataclass, field
 from typing import Optional, Tuple, Dict, Any

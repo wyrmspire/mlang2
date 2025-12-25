@@ -11,7 +11,7 @@ import json
 
 from src.features.pipeline import FeatureConfig
 from src.labels.labeler import LabelConfig
-from src.sim.oco import OCOConfig
+from src.sim.oco_engine import OCOConfig
 from src.sim.bar_fill_model import BarFillConfig
 from src.sim.costs import CostModel, DEFAULT_COSTS
 from src.models.train import TrainConfig

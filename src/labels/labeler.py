@@ -13,7 +13,7 @@ from src.labels.counterfactual import (
     compute_counterfactual,
     compute_multi_oco_counterfactuals
 )
-from src.sim.oco import OCOConfig
+from src.sim.oco_engine import OCOConfig
 from src.sim.bar_fill_model import BarFillConfig
 from src.sim.costs import CostModel, DEFAULT_COSTS
 

@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from typing import Dict, Any, Optional, List
 
 from src.policy.actions import Action, SkipReason
-from src.sim.oco import OCOConfig
+from src.sim.oco_engine import OCOConfig
 
 
 @dataclass

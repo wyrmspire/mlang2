@@ -7,7 +7,7 @@ from enum import Enum
 from dataclasses import dataclass, field
 from typing import Optional, List, Dict, Any
 
-from src.sim.oco import OCOConfig
+from src.sim.oco_engine import OCOConfig
 
 
 class Action(Enum):

@@ -161,10 +161,11 @@ class TestVolume(unittest.TestCase):
     def setUp(self):
         """Create sample data."""
         np.random.seed(42)
+        close = 5000 + np.cumsum(np.random.randn(100) * 0.5)
         self.df = pd.DataFrame({
-            'high': 5000 + np.cumsum(np.random.randn(100) * 0.5) + 2,
-            'low': 5000 + np.cumsum(np.random.randn(100) * 0.5) - 2,
-            'close': 5000 + np.cumsum(np.random.randn(100) * 0.5),
+            'close': close,
+            'high': close + np.abs(np.random.randn(100)) + 1,
+            'low': close - np.abs(np.random.randn(100)) - 1,
             'volume': np.random.randint(1000, 5000, 100)
         })
     
@@ -268,10 +269,11 @@ class TestBreakouts(unittest.TestCase):
     def setUp(self):
         """Create sample data."""
         np.random.seed(42)
+        close = 5000 + np.cumsum(np.random.randn(100) * 0.5)
         self.df = pd.DataFrame({
-            'high': 5000 + np.cumsum(np.random.randn(100) * 0.5) + 2,
-            'low': 5000 + np.cumsum(np.random.randn(100) * 0.5) - 2,
-            'close': 5000 + np.cumsum(np.random.randn(100) * 0.5),
+            'close': close,
+            'high': close + np.abs(np.random.randn(100)) + 1,
+            'low': close - np.abs(np.random.randn(100)) - 1,
             'volume': np.random.randint(1000, 5000, 100)
         })
     

@@ -4,7 +4,7 @@ Standard variations of OCO configurations for multi-OCO testing.
 Now includes stop type variations.
 """
 
-from src.sim.oco import OCOConfig
+from src.sim.oco_engine import OCOConfig
 from src.sim.stop_calculator import StopType, StopConfig
 
 
