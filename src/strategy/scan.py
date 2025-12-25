@@ -39,10 +39,12 @@ from src.policy.actions import Action, SkipReason
 
 from src.datasets.decision_record import DecisionRecord
 from src.datasets.trade_record import TradeRecord
-from src.sim.oco_engine import OCOBracket, OCOConfig
+from src.sim.oco_engine import OCOBracket, OCOConfig, OCOEngine, DEFAULT_OCO_ENGINE
+from src.sim.sizing import calculate_contracts, calculate_pnl_dollars, calculate_reward_dollars, DEFAULT_MAX_RISK_DOLLARS
 
 from src.viz.export import Exporter
 from src.viz.config import VizConfig
+from src.viz.window_utils import enforce_2hour_window
 
 
 # =============================================================================
@@ -311,38 +313,25 @@ def run_strategy_scan(
             oco_name="strategy"
         )
         
-        # Get raw OHLCV window for chart - MUST match ifvg_debug pattern:
-        # 1. Use df_1m (not df_scan)
-        # 2. Time-based lookup centered on entry_time
-        # 3. 120 bars history (2 hrs for context), 120 bars future on 1m data
-        history_bars_1m = 120  # 2 hours of context before trade
-        future_bars_1m = 120
+        # Get raw OHLCV window for chart - ENFORCING 2-HOUR POLICY
+        # According to ARCHITECTURE_AGREEMENT.md Section 3:
+        # - 2 hours before entry
+        # - 2 hours after exit (estimated from bars_held)
+        raw_ohlcv, window_warning = enforce_2hour_window(
+            df_1m=df_1m,
+            entry_time=bar_time,
+            bars_held=int(cf.bars_held)
+        )
         
-        # Find entry index in df_1m by time
-        mask = df_1m['time'] <= bar_time
-        if not mask.any():
-            entry_idx_1m = 0
-        else:
-            entry_idx_1m = mask.sum() - 1
-        
-        start_raw_idx = max(0, entry_idx_1m - history_bars_1m)
-        end_raw_idx = min(len(df_1m), entry_idx_1m + future_bars_1m)
-        raw_slice = df_1m.iloc[start_raw_idx:end_raw_idx]
-        
-        # Format as objects with timestamps (like ifvg_debug) - UI requires this
-        raw_ohlcv = [
-            {
-                "time": row['time'].isoformat() if hasattr(row['time'], 'isoformat') else str(row['time']),
-                "open": float(row['open']),
-                "high": float(row['high']),
-                "low": float(row['low']),
-                "close": float(row['close']),
-                "volume": int(row['volume'])
-            }
-            for _, row in raw_slice.iterrows()
-        ]
+        # Record warning if data is missing
+        if window_warning:
+            # Will be added to exporter._window_warnings
+            pass
         
         # Future bars from 1m data (for counterfactual viz)
+        # Keep existing future bars for backward compatibility
+        entry_idx_1m = (df_1m['time'] <= bar_time).sum() - 1
+        future_bars_1m = 120
         future_slice = df_1m.iloc[entry_idx_1m+1:entry_idx_1m+future_bars_1m+1]
         future_bars = [
             {
@@ -356,14 +345,23 @@ def run_strategy_scan(
             for _, row in future_slice.iterrows()
         ] if len(future_slice) > 0 else []
         
-        # === POSITION SIZING: $300 max risk ===
-        max_risk_dollars = 300
-        risk_points = levels.risk_points
-        point_value = 50  # ES futures
-        contracts = max(1, int(max_risk_dollars / (risk_points * point_value))) if risk_points > 0 else 1
-        risk_dollars = contracts * risk_points * point_value
-        reward_dollars = contracts * (levels.tp_price - entry_price) * point_value if direction == "LONG" else contracts * (entry_price - levels.tp_price) * point_value
-        reward_dollars = abs(reward_dollars)
+        # === POSITION SIZING: Use centralized sizing function ===
+        sizing_result = calculate_contracts(
+            entry_price=entry_price,
+            stop_price=levels.stop_price,
+            max_risk_dollars=DEFAULT_MAX_RISK_DOLLARS
+        )
+        contracts = sizing_result.contracts
+        risk_points = sizing_result.risk_points
+        risk_dollars = sizing_result.risk_dollars
+        
+        # Calculate reward using same cost model
+        reward_dollars = calculate_reward_dollars(
+            entry_price=entry_price,
+            tp_price=levels.tp_price,
+            direction=direction,
+            contracts=contracts
+        )
         
         # Create decision record
         decision_id = f"{trigger.trigger_id}_{decision_idx:04d}"
@@ -419,11 +417,21 @@ def run_strategy_scan(
             atr_at_creation=atr_value,
             config=oco_config
         )
-        exporter.on_bracket_created(decision_id, oco_bracket)
+        # CRITICAL: Pass contracts to exporter (not defaulted to 1)
+        exporter.on_bracket_created(decision_id, oco_bracket, contracts=contracts)
         
         # === REQUIRED EXPORTER HOOK 3: on_trade_closed ===
         exit_bar = bar_idx + int(cf.bars_held)
         exit_time = bar_time + pd.Timedelta(minutes=int(cf.bars_held) * (5 if timeframe == '5m' else 15 if timeframe == '15m' else 1))
+        
+        # Use centralized PnL calculation (SINGLE source of truth)
+        pnl_points, pnl_dollars = calculate_pnl_dollars(
+            entry_price=entry_price,
+            exit_price=cf.exit_price,
+            direction=direction,
+            contracts=contracts,
+            include_commission=True
+        )
         
         trade = TradeRecord(
             trade_id=str(uuid.uuid4())[:8],
@@ -437,12 +445,12 @@ def run_strategy_scan(
             exit_price=cf.exit_price,
             exit_reason=cf.outcome,
             outcome=cf.outcome,
-            pnl_points=cf.pnl_dollars / 50,  # Approx conversion
-            pnl_dollars=cf.pnl_dollars * contracts,  # Scale by contracts for $300 risk
-            r_multiple=cf.pnl_dollars / (levels.risk_points * 50) if levels.risk_points > 0 else 0,
+            pnl_points=pnl_points,
+            pnl_dollars=pnl_dollars,
+            r_multiple=pnl_points / risk_points if risk_points > 0 else 0,
             bars_held=int(cf.bars_held),
-            mae=0,  # Would need to compute
-            mfe=0,
+            mae=0,  # Would need to compute via OCOEngine
+            mfe=0,  # Would need to compute via OCOEngine
             scanner_id=trigger.trigger_id,
             entry_atr=atr_value
         )
