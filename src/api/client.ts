@@ -248,5 +248,15 @@ export const api = {
         // API_BASE is set by checkBackend hopefully? 
         // We might need to ensure checkBackend is called, but startReplay calls it.
         return `${API_BASE}/replay/stream/${sessionId}`;
+    },
+
+    getYFinanceData: async (ticker: string, days: number): Promise<any> => {
+        const hasBackend = await checkBackend();
+        if (!hasBackend) throw new Error('Backend unavailable');
+        const response = await fetch(`${API_BASE}/market/yfinance?ticker=${ticker}&days=${days}`);
+        if (!response.ok) {
+            throw new Error(`YFinance fetch failed: ${response.status}`);
+        }
+        return response.json();
     }
 };

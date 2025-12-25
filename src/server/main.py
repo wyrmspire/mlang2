@@ -354,77 +354,245 @@ async def get_continuous_contract(
     }
 
 
+@app.get("/market/yfinance")
+async def get_yfinance_data(
+    ticker: str = Query("MES=F", description="Ticker symbol"),
+    days: int = Query(7, description="Number of days (max 7 for 1m data)")
+) -> Dict[str, Any]:
+    """
+    Fetch historical data from YFinance as a static JSON blob.
+    Used for frontend-driven replay.
+    """
+    import yfinance as yf
+    from datetime import datetime, timedelta
+    from zoneinfo import ZoneInfo
+    import pandas as pd
+    
+    EST = ZoneInfo("America/New_York")
+    
+    try:
+        # 1m data is limited to 7 days by Yahoo
+        actual_days = min(days, 7)
+        end = datetime.now()
+        start = end - timedelta(days=actual_days)
+        
+        # Download data
+        yf_ticker = yf.Ticker(ticker)
+        df = yf_ticker.history(start=start, end=end, interval="1m")
+        
+        if df is None or len(df) == 0:
+            return {"ticker": ticker, "count": 0, "bars": [], "message": f"No data found for {ticker}"}
+        
+        # Standardize columns
+        df.columns = [c.lower() for c in df.columns]
+        df = df.reset_index()
+        
+        # Handle time column name variations
+        time_col = None
+        for col in ['Datetime', 'datetime', 'Date', 'date', 'time']:
+            if col in df.columns:
+                time_col = col
+                break
+        
+        if time_col is None:
+            return {"ticker": ticker, "count": 0, "bars": [], "message": "No time column found in data"}
+        
+        # Convert to list of dicts
+        bars = []
+        for _, row in df.iterrows():
+            ts = row[time_col]
+            if hasattr(ts, 'isoformat'):
+                ts_str = ts.isoformat()
+            else:
+                ts_str = str(ts)
+                
+            bars.append({
+                'time': ts_str,
+                'open': float(row['open']),
+                'high': float(row['high']),
+                'low': float(row['low']),
+                'close': float(row['close']),
+                'volume': float(row.get('volume', 0))
+            })
+            
+        return {
+            "ticker": ticker,
+            "timeframe": "1m",
+            "count": len(bars),
+            "bars": bars
+        }
+        
+    except Exception as e:
+        print(f"YFinance Error: {e}")
+        raise HTTPException(500, f"Failed to fetch YFinance data: {str(e)}")
+
+
 # =============================================================================
-# ENDPOINTS: Agent Chat
+# ENDPOINTS: Agent Chat (with Gemini Function Calling)
 # =============================================================================
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 GEMINI_MODEL = "gemini-2.0-flash-exp"
 
+# Tool definitions for Gemini Function Calling
+AGENT_TOOLS = [
+    {
+        "name": "run_strategy",
+        "description": "Run a modular strategy scan on historical data. Creates a new run that appears in the run list for visualization.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "strategy": {
+                    "type": "string",
+                    "enum": ["modular", "opening_range"],
+                    "description": "Strategy type. Use 'modular' for custom trigger/bracket configs."
+                },
+                "start_date": {
+                    "type": "string",
+                    "description": "Start date in YYYY-MM-DD format. Data available: 2025-03-18 to 2025-09-17."
+                },
+                "weeks": {
+                    "type": "integer",
+                    "description": "Number of weeks to scan.",
+                    "minimum": 1,
+                    "maximum": 26
+                },
+                "run_name": {
+                    "type": "string",
+                    "description": "Optional custom name for the run."
+                },
+                "trigger_type": {
+                    "type": "string",
+                    "enum": ["ema_cross", "ema_bounce", "rsi_threshold", "ifvg", "orb", "candle_pattern", "time"],
+                    "description": "Type of entry trigger."
+                },
+                "trigger_params": {
+                    "type": "object",
+                    "description": "Parameters for the trigger (e.g., {fast: 9, slow: 21} for ema_cross)."
+                },
+                "bracket_type": {
+                    "type": "string",
+                    "enum": ["atr", "percent", "fixed"],
+                    "description": "Type of stop/take-profit bracket."
+                },
+                "stop_atr": {
+                    "type": "number",
+                    "description": "Stop loss in ATR multiples (for atr bracket).",
+                    "default": 2.0
+                },
+                "tp_atr": {
+                    "type": "number",
+                    "description": "Take profit in ATR multiples (for atr bracket).",
+                    "default": 3.0
+                }
+            },
+            "required": ["strategy", "start_date", "weeks", "trigger_type", "bracket_type"]
+        }
+    },
+    {
+        "name": "set_index",
+        "description": "Navigate to a specific decision or trade by index number.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "index": {
+                    "type": "integer",
+                    "description": "The index to navigate to."
+                }
+            },
+            "required": ["index"]
+        }
+    },
+    {
+        "name": "set_mode",
+        "description": "Switch between viewing decisions or trades.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "mode": {
+                    "type": "string",
+                    "enum": ["DECISION", "TRADE"],
+                    "description": "The view mode to switch to."
+                }
+            },
+            "required": ["mode"]
+        }
+    },
+    {
+        "name": "load_run",
+        "description": "Load an existing run for visualization.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "run_id": {
+                    "type": "string",
+                    "description": "The run ID to load."
+                }
+            },
+            "required": ["run_id"]
+        }
+    },
+    {
+        "name": "list_runs",
+        "description": "List all available runs that can be loaded.",
+        "parameters": {
+            "type": "object",
+            "properties": {}
+        }
+    }
+]
 
-def build_agent_prompt(context: ChatContext, decisions: List[Dict], trades: List[Dict]) -> str:
+
+def build_agent_system_prompt(context: ChatContext, decisions: List[Dict], trades: List[Dict]) -> str:
     """Build system prompt for the trade viz agent."""
     # Find current item
     if context.currentMode == "DECISION":
         current = next((d for d in decisions if d.get("index") == context.currentIndex), None)
         item_type = "decision"
+        total_items = len(decisions)
     else:
         current = next((t for t in trades if t.get("index") == context.currentIndex), None)
         item_type = "trade"
+        total_items = len(trades)
     
-    current_json = json.dumps(current, indent=2) if current else "None selected"
-    
-    # Discovery info for modular system
-    trigger_types = ["time", "candle_pattern", "ema_cross", "ema_bounce", "rsi_threshold", "ifvg", "orb"]
-    bracket_types = ["atr", "percent", "fixed"]
+    current_json = json.dumps(current, indent=2, default=str)[:1000] if current else "None selected"
 
     return f"""You are a STRATEGY SCAN agent for the MLang2 trading research platform.
 
-YOUR PURPOSE: Create and run strategy scans on specified time windows so the user can visually 
-analyze if trades make sense. You DO NOT run replays or live trading - that is a separate mode.
+YOUR PURPOSE: Create and run strategy scans on historical data so users can visually analyze trade setups.
 
 CURRENT CONTEXT:
-- Run ID: {context.runId}
-- Viewing: {item_type} index {context.currentIndex}
+- Run ID: {context.runId or "No run loaded"}
+- Viewing: {item_type} index {context.currentIndex} of {total_items}
 - Mode: {context.currentMode}
 
 CURRENT {item_type.upper()} DATA:
 {current_json}
 
-AVAILABLE ACTIONS:
-1. Navigate decisions/trades: ACTION: {{"type": "SET_INDEX", "payload": <number>}}
-2. Switch view mode: ACTION: {{"type": "SET_MODE", "payload": "DECISION" or "TRADE"}}
-3. Load existing run: ACTION: {{"type": "LOAD_RUN", "payload": "<run_id>"}}
-4. RUN STRATEGY SCAN: ACTION: {{"type": "RUN_STRATEGY", "payload": {{"strategy": "modular", "start_date": "YYYY-MM-DD", "weeks": N, "config": <config_dict>}}}}
-5. TRAIN MODEL FROM SCAN: ACTION: {{"type": "TRAIN_FROM_SCAN", "payload": {{"scan_run_id": "<run_id>", "model_name": "my_model"}}}}
+TRIGGER TYPES AND THEIR PARAMETERS:
+- ema_cross: {{fast: 9, slow: 21}} - EMA crossover signals
+- ema_bounce: {{period: 21, threshold: 0.5}} - Price bouncing off EMA
+- rsi_threshold: {{overbought: 70, oversold: 30}} - RSI extremes
+- ifvg: {{}} - Institutional fair value gaps
+- orb: {{range_minutes: 15}} - Opening range breakout
+- candle_pattern: {{pattern: "engulfing"}} - Candlestick patterns
+- time: {{hour: 9, minute: 30}} - Time-based triggers
 
-CRITICAL: To execute ANY action, you MUST include "ACTION:" at the end of your response.
-Do NOT just describe the config - you MUST wrap it in: ACTION: {{"type": "...", "payload": ...}}
+BRACKET TYPES:
+- atr: Uses ATR multiples for stop/TP (stop_atr, tp_atr)
+- percent: Uses percentage of price
+- fixed: Fixed point values
 
-MODULAR STRATEGY CONFIG:
-{{
-  "trigger": {{"type": "<trigger_type>", ...trigger_params}},
-  "bracket": {{"type": "<bracket_type>", "stop_atr": N, "tp_atr": M}}
-}}
+DATA RANGE: March 18 - September 17, 2025.
 
-TRIGGER TYPES: {trigger_types}
-BRACKET TYPES: {bracket_types}
-
-DATA RANGE: Historical data covers March 18 - September 17, 2025.
-
-EXAMPLE - User asks "Run an EMA cross scan for last 2 weeks of May":
-I'll run an EMA cross strategy scan for May 19-31, 2025.
-ACTION: {{"type": "RUN_STRATEGY", "payload": {{"strategy": "modular", "start_date": "2025-05-19", "weeks": 2, "config": {{"trigger": {{"type": "ema_cross", "fast": 9, "slow": 21}}, "bracket": {{"type": "atr", "stop_atr": 2, "tp_atr": 3}}}}}}}}
-
-EXAMPLE - User asks "Show me the next trade":
-ACTION: {{"type": "SET_INDEX", "payload": {context.currentIndex + 1}}}
-
-Be concise. Focus on creating scans the user can visually evaluate."""
+Use your tools to help the user. When they ask to run/create/test a strategy, use run_strategy.
+When they want to navigate, use set_index. When they want to load a different run, use load_run.
+Be concise and action-oriented."""
 
 
 @app.post("/agent/chat")
 async def agent_chat(request: ChatRequest) -> AgentResponse:
-    """Proxy chat to Gemini agent with trade context."""
+    """Proxy chat to Gemini agent with function calling."""
     
     if not GEMINI_API_KEY:
         return AgentResponse(
@@ -439,15 +607,27 @@ async def agent_chat(request: ChatRequest) -> AgentResponse:
         decisions = []
         trades = []
     
-    # Build prompt
-    system_prompt = build_agent_prompt(request.context, decisions, trades)
+    # Build system instruction
+    system_prompt = build_agent_system_prompt(request.context, decisions, trades)
     
     # Build messages for Gemini
-    gemini_messages = [{"role": "user", "parts": [{"text": system_prompt}]}]
+    gemini_contents = []
     
+    # Add system instruction as first user message (Gemini style)
+    gemini_contents.append({"role": "user", "parts": [{"text": system_prompt}]})
+    gemini_contents.append({"role": "model", "parts": [{"text": "Understood. I'm ready to help with strategy scans and navigation. What would you like to do?"}]})
+    
+    # Add conversation history
     for msg in request.messages:
         role = "user" if msg.role == "user" else "model"
-        gemini_messages.append({"role": role, "parts": [{"text": msg.content}]})
+        gemini_contents.append({"role": role, "parts": [{"text": msg.content}]})
+    
+    # Build request with function calling
+    gemini_request = {
+        "contents": gemini_contents,
+        "tools": [{"function_declarations": AGENT_TOOLS}],
+        "tool_config": {"function_calling_config": {"mode": "AUTO"}}
+    }
     
     # Call Gemini API
     async with httpx.AsyncClient() as client:
@@ -455,267 +635,379 @@ async def agent_chat(request: ChatRequest) -> AgentResponse:
             response = await client.post(
                 f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent",
                 params={"key": GEMINI_API_KEY},
-                json={"contents": gemini_messages},
+                json=gemini_request,
                 timeout=30.0
             )
             response.raise_for_status()
             data = response.json()
             
-            # Extract text from response
+            # Parse response
             reply_text = ""
+            ui_action = None
+            
             if "candidates" in data and data["candidates"]:
                 parts = data["candidates"][0].get("content", {}).get("parts", [])
+                
                 for part in parts:
-                    if "text" in part:
+                    # Check for function call
+                    if "functionCall" in part:
+                        fc = part["functionCall"]
+                        fn_name = fc.get("name")
+                        fn_args = fc.get("args", {})
+                        
+                        print(f"[AGENT] Function call: {fn_name}({fn_args})")
+                        
+                        # Map function calls to UI actions
+                        if fn_name == "run_strategy":
+                            # Build modular config from function args
+                            config = {
+                                "trigger": {
+                                    "type": fn_args.get("trigger_type", "ema_cross"),
+                                    **fn_args.get("trigger_params", {})
+                                },
+                                "bracket": {
+                                    "type": fn_args.get("bracket_type", "atr"),
+                                    "stop_atr": fn_args.get("stop_atr", 2.0),
+                                    "tp_atr": fn_args.get("tp_atr", 3.0)
+                                }
+                            }
+                            ui_action = UIAction(
+                                type="RUN_STRATEGY",
+                                payload={
+                                    "strategy": fn_args.get("strategy", "modular"),
+                                    "start_date": fn_args.get("start_date", "2025-03-18"),
+                                    "weeks": fn_args.get("weeks", 1),
+                                    "run_name": fn_args.get("run_name"),
+                                    "config": config
+                                }
+                            )
+                            reply_text = f"Running {fn_args.get('trigger_type', 'modular')} strategy scan from {fn_args.get('start_date')} for {fn_args.get('weeks')} week(s)..."
+                        
+                        elif fn_name == "set_index":
+                            ui_action = UIAction(type="SET_INDEX", payload=fn_args.get("index", 0))
+                            reply_text = f"Navigating to index {fn_args.get('index')}."
+                        
+                        elif fn_name == "set_mode":
+                            ui_action = UIAction(type="SET_MODE", payload=fn_args.get("mode", "DECISION"))
+                            reply_text = f"Switching to {fn_args.get('mode')} view."
+                        
+                        elif fn_name == "load_run":
+                            ui_action = UIAction(type="LOAD_RUN", payload=fn_args.get("run_id"))
+                            reply_text = f"Loading run: {fn_args.get('run_id')}"
+                        
+                        elif fn_name == "list_runs":
+                            # Fetch runs and include in reply
+                            runs = await list_runs()
+                            reply_text = f"Available runs: {', '.join(runs[:10])}" + (" ..." if len(runs) > 10 else "")
+                    
+                    # Check for text response
+                    elif "text" in part:
                         reply_text += part["text"]
             
             if not reply_text:
-                reply_text = "I didn't receive a valid response from the model."
+                reply_text = "I'm ready to help. What would you like to do?"
             
-            # Parse for ACTION
-            ui_action = None
-            
-            # Helper to find JSON in text
-            def extract_json(text):
-                import re
-                match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', text, re.DOTALL)
-                if match:
-                    return match.group(1)
-                return None
-
-            if "ACTION:" in reply_text:
-                # Explicit ACTION format
-                parts = reply_text.split("ACTION:")
-                action_part = parts[-1].strip()
-                
-                # Check for markdown code blocks in the action part
-                json_block = extract_json(action_part)
-                action_str = json_block if json_block else action_part
-
-                try:
-                    action_data = json.loads(action_str)
-                    ui_action = UIAction(**action_data)
-                    reply_text = parts[0].strip()
-                except Exception as e:
-                    print(f"Failed to parse explicit ACTION: {e}")
-            
-            # Fallback: Check for implicit JSON config
-            if not ui_action:
-                import re
-                json_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', reply_text, re.DOTALL)
-                if json_match:
-                    json_block = json_match.group(1)
-                    try:
-                        data = json.loads(json_block)
-                        # Heuristic: Is this a modular strategy config?
-                        if "trigger" in data and "bracket" in data:
-                             ui_action = UIAction(type="RUN_STRATEGY", payload={"strategy": "modular", "config": data})
-                             # Remove the JSON command from chat logic
-                             reply_text = reply_text.replace(json_match.group(0), "").strip()
-                        # Heuristic: Is this a Run ID load?
-                        elif "run_id" in data and len(data) == 1:
-                             ui_action = UIAction(type="LOAD_RUN", payload=data["run_id"])
-                             reply_text = reply_text.replace(json_match.group(0), "").strip()
-                    except:
-                        pass
+            if ui_action:
+                print(f"[AGENT] Returning action: {ui_action.type}")
             
             return AgentResponse(reply=reply_text, ui_action=ui_action)
             
         except httpx.HTTPError as e:
+            print(f"[AGENT] HTTP Error: {e}")
             return AgentResponse(reply=f"Error calling Gemini: {str(e)}")
+        except Exception as e:
+            print(f"[AGENT] Error: {e}")
+            return AgentResponse(reply=f"Error: {str(e)}")
+
 
 
 # =============================================================================
-# ENDPOINTS: Lab Research Agent
+# ENDPOINTS: Lab Research Agent (with Gemini Function Calling)
 # =============================================================================
 
 class LabChatRequest(BaseModel):
     messages: List[ChatMessage]
 
 
+# Lab Agent Tool definitions
+LAB_TOOLS = [
+    {
+        "name": "run_modular_strategy",
+        "description": "Run a modular strategy scan on historical data with custom trigger and bracket configuration.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "trigger_type": {
+                    "type": "string",
+                    "enum": ["ema_cross", "ema_bounce", "rsi_threshold", "ifvg", "orb", "candle_pattern", "time"],
+                    "description": "Type of entry trigger"
+                },
+                "trigger_params": {
+                    "type": "object",
+                    "description": "Parameters for the trigger (e.g., {fast: 9, slow: 21} for ema_cross)"
+                },
+                "bracket_type": {
+                    "type": "string",
+                    "enum": ["atr", "percent", "fixed"],
+                    "description": "Type of stop/take-profit bracket"
+                },
+                "stop_atr": {"type": "number", "description": "Stop loss in ATR multiples", "default": 2.0},
+                "tp_atr": {"type": "number", "description": "Take profit in ATR multiples", "default": 3.0},
+                "start_date": {"type": "string", "description": "Start date YYYY-MM-DD (data: 2025-03-18 to 2025-09-17)"},
+                "weeks": {"type": "integer", "description": "Number of weeks to scan", "minimum": 1, "maximum": 26},
+                "run_name": {"type": "string", "description": "Optional custom name for the run"}
+            },
+            "required": ["trigger_type", "bracket_type", "start_date", "weeks"]
+        }
+    },
+    {
+        "name": "start_live_mode",
+        "description": "Start live trading simulation with real-time YFinance data.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "ticker": {"type": "string", "enum": ["MES=F", "ES=F", "NQ=F", "SPY"], "description": "Ticker symbol"},
+                "strategy": {"type": "string", "enum": ["ema_cross", "ifvg", "orb"], "description": "Strategy to use"}
+            },
+            "required": ["ticker", "strategy"]
+        }
+    },
+    {
+        "name": "query_experiments",
+        "description": "Query the experiment database for past strategy results.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "sort_by": {"type": "string", "enum": ["win_rate", "total_pnl", "total_trades"], "description": "Metric to sort by"},
+                "top_k": {"type": "integer", "description": "Number of results to return", "default": 5}
+            },
+            "required": ["sort_by"]
+        }
+    },
+    {
+        "name": "list_available_runs",
+        "description": "List all available strategy runs that can be visualized.",
+        "parameters": {"type": "object", "properties": {}}
+    }
+]
+
+
 @app.post("/lab/agent")
 async def lab_agent(request: LabChatRequest):
     """
-    Lab research agent - can execute strategies and return structured results.
+    Lab research agent with Gemini function calling.
     """
     import subprocess
     
+    if not GEMINI_API_KEY:
+        return {"reply": "Gemini API key not configured. Set GEMINI_API_KEY.", "type": "text"}
+    
     if not request.messages:
-        return {"reply": "No message provided."}
+        return {"reply": "No message provided.", "type": "text"}
     
-    last_message = request.messages[-1].content.lower()
+    # Build system prompt for lab agent
+    lab_system_prompt = """You are a Research Lab agent for the MLang2 trading research platform.
+
+YOUR PURPOSE: Help users design, test, and analyze trading strategies. You can:
+1. Run modular strategy scans with custom triggers and brackets
+2. Start live trading simulations
+3. Query past experiment results
+
+TRIGGER TYPES:
+- ema_cross: EMA crossover (params: fast, slow) 
+- ema_bounce: Price bouncing off EMA (params: period, threshold)
+- rsi_threshold: RSI extremes (params: overbought, oversold)
+- ifvg: Institutional fair value gaps
+- orb: Opening range breakout (params: range_minutes)
+- candle_pattern: Candlestick patterns (params: pattern)
+- time: Time-based (params: hour, minute)
+
+BRACKET TYPES:
+- atr: ATR-based stops/TPs (stop_atr, tp_atr)
+- percent: Percentage-based
+- fixed: Fixed point values
+
+DATA RANGE: March 18 - September 17, 2025.
+
+Use your tools proactively. When users ask to test something, run it immediately.
+Be concise and results-focused."""
+
+    # Build messages
+    gemini_contents = []
+    gemini_contents.append({"role": "user", "parts": [{"text": lab_system_prompt}]})
+    gemini_contents.append({"role": "model", "parts": [{"text": "Welcome to the Research Lab! I can help you test strategies, run scans, and analyze results. What would you like to explore?"}]})
     
-    # Parse intent from message
-    result = None
-    reply = ""
-    run_id = None  # Track run_id for visualization
+    for msg in request.messages:
+        role = "user" if msg.role == "user" else "model"
+        gemini_contents.append({"role": role, "parts": [{"text": msg.content}]})
     
-    # Check for strategy execution requests
-    if "ema" in last_message and ("scan" in last_message or "run" in last_message):
-        strategy = "cross"
-        if "bounce" in last_message:
-            strategy = "bounce"
-        elif "stack" in last_message:
-            strategy = "stack"
-        
-        # Run the EMA scan
+    # Build request with function calling
+    gemini_request = {
+        "contents": gemini_contents,
+        "tools": [{"function_declarations": LAB_TOOLS}],
+        "tool_config": {"function_calling_config": {"mode": "AUTO"}}
+    }
+    
+    # Call Gemini API
+    async with httpx.AsyncClient() as client:
         try:
-            proc = subprocess.run(
-                ["python", "scripts/run_ema_scan.py", "--strategy", strategy, "--days", "7"],
-                capture_output=True, text=True, timeout=120, cwd=str(RESULTS_DIR.parent)
+            response = await client.post(
+                f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent",
+                params={"key": GEMINI_API_KEY},
+                json=gemini_request,
+                timeout=30.0
             )
+            response.raise_for_status()
+            data = response.json()
             
-            # Parse output for results
-            output = proc.stdout
-            if "Win Rate:" in output:
-                lines = output.split("\n")
-                for line in lines:
-                    if "Found" in line:
-                        reply += line + "\n"
-                    if "WIN:" in line or "LONG:" in line or "Win Rate:" in line:
-                        reply += line + "\n"
+            reply = ""
+            result = None
+            run_id = None
+            
+            if "candidates" in data and data["candidates"]:
+                parts = data["candidates"][0].get("content", {}).get("parts", [])
                 
-                # Try to extract numbers for result card
-                trades_match = re.search(r"Found (\d+) signals", output)
-                wins_match = re.search(r"WIN: (\d+)", output)
-                wr_match = re.search(r"Win Rate: ([\d.]+)%", output)
-                
-                if trades_match and wins_match and wr_match:
-                    trades = int(trades_match.group(1))
-                    wins = int(wins_match.group(1))
-                    wr = float(wr_match.group(1)) / 100
-                    result = {
-                        "strategy": f"EMA {strategy.title()}",
-                        "trades": trades,
-                        "wins": wins,
-                        "losses": trades - wins,
-                        "win_rate": wr,
-                        "total_pnl": 0
-                    }
-            else:
-                reply = f"Ran EMA {strategy} scan:\n{output}"
-        except Exception as e:
-            reply = f"Error running strategy: {str(e)}"
-    
-    elif "orb" in last_message or "opening range" in last_message:
-        try:
-            proc = subprocess.run(
-                ["python", "scripts/run_orb_gridsearch.py", "--days", "7"],
-                capture_output=True, text=True, timeout=180, cwd=str(RESULTS_DIR.parent)
-            )
-            output = proc.stdout
-            reply = "ORB Grid Search Complete!\n\n"
-            if "BEST CONFIGURATION" in output:
-                start = output.index("BEST CONFIGURATION")
-                reply += output[start:]
-        except Exception as e:
-            reply = f"Error: {str(e)}"
-    
-    elif "lunch" in last_message and "fade" in last_message:
-        try:
-            proc = subprocess.run(
-                ["python", "scripts/run_lunch_fade.py", "--days", "7", "--save"],
-                capture_output=True, text=True, timeout=120, cwd=str(RESULTS_DIR.parent)
-            )
-            output = proc.stdout
-            reply = "Lunch Hour Fade Results:\n" + output.split("RESULTS")[1] if "RESULTS" in output else output
+                for part in parts:
+                    if "functionCall" in part:
+                        fc = part["functionCall"]
+                        fn_name = fc.get("name")
+                        fn_args = fc.get("args", {})
+                        
+                        print(f"[LAB AGENT] Function call: {fn_name}({fn_args})")
+                        
+                        if fn_name == "run_modular_strategy":
+                            # Build config and run the strategy
+                            config = {
+                                "trigger": {
+                                    "type": fn_args.get("trigger_type", "ema_cross"),
+                                    **fn_args.get("trigger_params", {})
+                                },
+                                "bracket": {
+                                    "type": fn_args.get("bracket_type", "atr"),
+                                    "stop_atr": fn_args.get("stop_atr", 2.0),
+                                    "tp_atr": fn_args.get("tp_atr", 3.0)
+                                }
+                            }
+                            
+                            run_name = fn_args.get("run_name") or f"lab_{fn_args.get('trigger_type')}_{fn_args.get('start_date', '').replace('-', '')}"
+                            out_dir = RESULTS_DIR / run_name
+                            
+                            cmd = [
+                                "python", "scripts/backtest_modular_strategy.py",
+                                "--config", json.dumps(config),
+                                "--start-date", fn_args.get("start_date", "2025-03-18"),
+                                "--weeks", str(fn_args.get("weeks", 1)),
+                                "--out", str(out_dir)
+                            ]
+                            
+                            try:
+                                proc = subprocess.run(
+                                    cmd,
+                                    capture_output=True,
+                                    text=True,
+                                    timeout=120,
+                                    cwd=str(RESULTS_DIR.parent)
+                                )
+                                
+                                if proc.returncode == 0:
+                                    # Parse output for results
+                                    output = proc.stdout
+                                    run_id = run_name
+                                    
+                                    # Try to extract stats
+                                    trades_match = re.search(r"Saved (\d+) records", output)
+                                    trades = int(trades_match.group(1)) if trades_match else 0
+                                    
+                                    reply = f"✅ **Strategy Scan Complete**\n\n"
+                                    reply += f"**Trigger:** {fn_args.get('trigger_type')}\n"
+                                    reply += f"**Period:** {fn_args.get('start_date')} ({fn_args.get('weeks')} week(s))\n"
+                                    reply += f"**Trades Found:** {trades}\n"
+                                    reply += f"**Run ID:** `{run_name}`\n\n"
+                                    reply += "Click 'Visualize' to analyze the trades."
+                                    
+                                    result = {
+                                        "strategy": fn_args.get("trigger_type", "modular").upper(),
+                                        "trades": trades,
+                                        "wins": 0,
+                                        "losses": 0,
+                                        "win_rate": 0,
+                                        "total_pnl": 0
+                                    }
+                                else:
+                                    reply = f"❌ Strategy run failed:\n```\n{proc.stderr[-500:]}\n```"
+                            except subprocess.TimeoutExpired:
+                                reply = "❌ Strategy timed out (>120s)"
+                            except Exception as e:
+                                reply = f"❌ Error: {str(e)}"
+                        
+                        elif fn_name == "start_live_mode":
+                            try:
+                                from src.server.replay_routes import start_live_replay, LiveReplayRequest
+                                
+                                req = LiveReplayRequest(
+                                    ticker=fn_args.get("ticker", "MES=F"),
+                                    strategy=fn_args.get("strategy", "ema_cross"),
+                                    days=7,
+                                    speed=10.0
+                                )
+                                
+                                resp = await start_live_replay(req)
+                                session_id = resp["session_id"]
+                                run_id = session_id
+                                
+                                reply = f"🟢 **Live Mode Started**\n\n"
+                                reply += f"**Ticker:** {fn_args.get('ticker')}\n"
+                                reply += f"**Strategy:** {fn_args.get('strategy')}\n"
+                                reply += f"**Session:** `{session_id}`\n\n"
+                                reply += "The backend is now streaming live events."
+                                
+                                result = {
+                                    "strategy": f"Live {fn_args.get('strategy', '').upper()}",
+                                    "trades": 0, "wins": 0, "losses": 0, "win_rate": 0, "total_pnl": 0
+                                }
+                            except Exception as e:
+                                reply = f"❌ Error starting live mode: {str(e)}"
+                        
+                        elif fn_name == "query_experiments":
+                            try:
+                                from src.storage import ExperimentDB
+                                db = ExperimentDB()
+                                best = db.query_best(fn_args.get("sort_by", "win_rate"), top_k=fn_args.get("top_k", 5))
+                                
+                                reply = f"## Top {len(best)} Experiments by {fn_args.get('sort_by', 'win_rate')}\n\n"
+                                for i, exp in enumerate(best, 1):
+                                    reply += f"{i}. **{exp.get('strategy', 'unknown')}**: {exp.get('win_rate', 0):.1%} WR, {exp.get('total_trades', 0)} trades\n"
+                            except Exception as e:
+                                reply = f"❌ Error querying experiments: {str(e)}"
+                        
+                        elif fn_name == "list_available_runs":
+                            runs = await list_runs()
+                            reply = f"## Available Runs ({len(runs)})\n\n"
+                            for r in runs[:15]:
+                                reply += f"- `{r}`\n"
+                            if len(runs) > 15:
+                                reply += f"\n...and {len(runs) - 15} more"
+                    
+                    elif "text" in part:
+                        reply += part["text"]
             
-            # Extract run_id from output
-            run_id_match = re.search(r"Saved to ExperimentDB: (\S+)", output)
-            if run_id_match:
-                run_id = run_id_match.group(1)
-        except Exception as e:
-            reply = f"Error: {str(e)}"
-    
-    elif "combined" in last_message or ("orb" in last_message and "reversion" in last_message):
-        try:
-            proc = subprocess.run(
-                ["python", "scripts/run_combined_strategy.py", "--days", "7"],
-                capture_output=True, text=True, timeout=120, cwd=str(RESULTS_DIR.parent)
-            )
-            output = proc.stdout
-            reply = "Combined Strategy Results:\n"
-            if "RESULTS" in output:
-                reply += output.split("RESULTS")[1]
+            if not reply:
+                reply = "I'm ready to help with strategy research. What would you like to test?"
             
-            # Extract run_id from output
-            run_id_match = re.search(r"Stored: (\S+)", output)
-            if run_id_match:
-                run_id = run_id_match.group(1)
-        except Exception as e:
-            reply = f"Error: {str(e)}"
-    
-    elif "live" in last_message and ("mode" in last_message or "start" in last_message):
-        try:
-            # Default to MES ema cross
-            ticker = "MES=F"
-            strategy = "ema_cross"
-            if "ifvg" in last_message:
-                strategy = "ifvg"
-            if "es" in last_message and "mes" not in last_message:
-                ticker = "ES=F"
-                
-            # Use the existing endpoint logic to ensure session is registered
-            from src.server.replay_routes import start_live_replay, LiveReplayRequest
-            
-            req = LiveReplayRequest(
-                ticker=ticker,
-                strategy=strategy,
-                days=7,
-                speed=10.0 # Default speed
-            )
-            
-            # Await the route handler directly
-            resp = await start_live_replay(req)
-            
-            session_id = resp["session_id"]
-            run_id = session_id # For UI to connect
-            
-            reply = f"**Live Simulation Started** 🟢\n\nTicker: `{ticker}`\nStrategy: `{strategy}`\nMode: YFinance Real-Time\n\nSession ID: `{session_id}`\nThe backend is now streaming live events. Click 'Visualize' or wait for updates."
-            
-            result = {
-                "strategy": f"Live {strategy.upper()}",
-                "trades": 0,
-                "wins": 0,
-                "losses": 0,
-                "win_rate": 0,
-                "total_pnl": 0
+            return {
+                "reply": reply,
+                "type": "text",
+                "data": {"result": result} if result else None,
+                "result": result,
+                "run_id": run_id
             }
             
+        except httpx.HTTPError as e:
+            print(f"[LAB AGENT] HTTP Error: {e}")
+            return {"reply": f"Error calling Gemini: {str(e)}", "type": "text"}
         except Exception as e:
-            reply = f"Error starting live mode: {str(e)}"
-
-    elif "experiment" in last_message or "history" in last_message or "best" in last_message:
-        # Query experiment database
-        try:
-            from src.storage import ExperimentDB
-            db = ExperimentDB()
-            best = db.query_best("win_rate", top_k=5)
-            reply = "## Top 5 Experiments by Win Rate\n\n"
-            for exp in best:
-                reply += f"- **{exp.get('strategy', 'unknown')}**: {exp.get('win_rate', 0):.1%} WR, {exp.get('total_trades', 0)} trades\n"
-        except Exception as e:
-            reply = f"Error querying experiments: {str(e)}"
-    
-    else:
-        # General response
-        reply = """I can help you run strategies and analyze results. Try:
-
-- "Run EMA cross scan"
-- "Test the lunch hour fade strategy"
-- "Run ORB grid search"
-- "Show experiment history"
-- "Combined ORB + Mean Reversion"
-
-What would you like to test?"""
-    
-    return {
-        "reply": reply,
-        "type": "text",
-        "data": {"result": result} if result else None,
-        "result": result,
-        "run_id": run_id  # Include run_id for visualization
-    }
+            print(f"[LAB AGENT] Error: {e}")
+            return {"reply": f"Error: {str(e)}", "type": "text"}
 
 
 # =============================================================================
@@ -761,7 +1053,7 @@ async def run_strategy(request: RunStrategyRequest) -> Dict[str, Any]:
         "opening_range": "scripts/run_or_multi_oco.py",
         "or": "scripts/run_or_multi_oco.py",
         "always": "scripts/run_or_multi_oco.py",
-        "modular": "scripts/run_modular_strategy.py",
+        "modular": "scripts/backtest_modular_strategy.py",
     }
     
     script = scripts.get(strategy_id)
