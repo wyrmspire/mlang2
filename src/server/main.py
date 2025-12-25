@@ -19,6 +19,7 @@ import httpx
 from src.config import RESULTS_DIR
 from src.data.loader import load_continuous_contract
 from src.data.resample import resample_all_timeframes
+from src.core.tool_registry import ToolRegistry, ToolCategory
 
 
 app = FastAPI(title="MLang2 API", version="1.0.0")
@@ -428,11 +429,118 @@ async def get_yfinance_data(
 
 
 # =============================================================================
+# ENDPOINTS: Tool Registry & Catalog
+# =============================================================================
+
+@app.get("/tools/catalog")
+async def get_tools_catalog(category: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Get the unified tool catalog from ToolRegistry.
+    
+    This endpoint provides:
+    - All registered tools with their metadata
+    - Input/output schemas for validation
+    - Version information
+    - Categories and tags
+    
+    Query params:
+        category: Optional filter by category (scanner, model, indicator, skill, strategy, etc.)
+    
+    Returns:
+        Tool catalog with counts and tool details
+    """
+    try:
+        # Get full catalog
+        catalog = ToolRegistry.export_catalog()
+        
+        # Filter by category if requested
+        if category:
+            try:
+                cat_enum = ToolCategory(category.lower())
+                catalog['tools'] = [
+                    tool for tool in catalog['tools']
+                    if tool['category'] == cat_enum.value
+                ]
+                catalog['total_tools'] = len(catalog['tools'])
+            except ValueError:
+                raise HTTPException(400, f"Invalid category: {category}. Valid categories: {[c.value for c in ToolCategory]}")
+        
+        return catalog
+    except Exception as e:
+        raise HTTPException(500, f"Failed to generate tool catalog: {str(e)}")
+
+
+@app.get("/tools/{tool_id}")
+async def get_tool_info(tool_id: str) -> Dict[str, Any]:
+    """
+    Get detailed information about a specific tool.
+    
+    Args:
+        tool_id: Tool identifier
+    
+    Returns:
+        Tool metadata including schemas and version info
+    """
+    try:
+        info = ToolRegistry.get_info(tool_id)
+        return info.to_dict()
+    except KeyError:
+        raise HTTPException(404, f"Tool not found: {tool_id}")
+    except Exception as e:
+        raise HTTPException(500, f"Failed to get tool info: {str(e)}")
+
+
+@app.get("/tools/categories/list")
+async def list_tool_categories() -> Dict[str, Any]:
+    """
+    List all available tool categories.
+    
+    Returns:
+        List of categories with descriptions
+    """
+    return {
+        'categories': [
+            {
+                'value': cat.value,
+                'name': cat.name,
+                'description': _get_category_description(cat)
+            }
+            for cat in ToolCategory
+        ]
+    }
+
+
+def _get_category_description(category: ToolCategory) -> str:
+    """Get human-readable description for a tool category."""
+    descriptions = {
+        ToolCategory.SCANNER: "Pattern and signal detection tools",
+        ToolCategory.MODEL: "Machine learning model inference",
+        ToolCategory.INDICATOR: "Technical indicators and calculations",
+        ToolCategory.SKILL: "Agent capabilities and skills",
+        ToolCategory.STRATEGY: "Trading strategy executors",
+        ToolCategory.EXPORTER: "Data and visualization exporters",
+        ToolCategory.UTILITY: "Helper and utility tools",
+    }
+    return descriptions.get(category, "")
+
+
+# =============================================================================
 # ENDPOINTS: Agent Chat (with Gemini Function Calling)
 # =============================================================================
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 GEMINI_MODEL = "gemini-2.0-flash-exp"
+
+# =============================================================================
+# TODO: Replace hardcoded AGENT_TOOLS with dynamic catalog from ToolRegistry
+# 
+# Next steps for Phase 9 completion:
+# 1. Use ToolRegistry.get_gemini_function_declarations() instead of AGENT_TOOLS
+# 2. Filter by appropriate categories for agent vs lab contexts
+# 3. Remove these hardcoded definitions
+# 
+# For now, keeping for backward compatibility while migration is in progress.
+# =============================================================================
 
 # Tool definitions for Gemini Function Calling
 AGENT_TOOLS = [
@@ -728,6 +836,12 @@ async def agent_chat(request: ChatRequest) -> AgentResponse:
 class LabChatRequest(BaseModel):
     messages: List[ChatMessage]
 
+
+# =============================================================================
+# TODO: Replace hardcoded LAB_TOOLS with dynamic catalog from ToolRegistry
+# Same as AGENT_TOOLS above - this should use ToolRegistry.get_gemini_function_declarations()
+# with appropriate category filters for lab context.
+# =============================================================================
 
 # Lab Agent Tool definitions
 LAB_TOOLS = [
