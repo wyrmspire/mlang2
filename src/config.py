@@ -74,6 +74,7 @@ DEFAULT_LOOKBACK_15M = 8        # 2 hours of 15m bars
 
 DEFAULT_MAX_BARS_IN_TRADE = 200
 DEFAULT_SLIPPAGE_TICKS = 0.5
+DEFAULT_MAX_RISK_DOLLARS = 300.0  # Default max risk per trade for position sizing
 
 # =============================================================================
 # DATA FILES

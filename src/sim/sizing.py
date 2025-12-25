@@ -15,10 +15,7 @@ from typing import Tuple
 from dataclasses import dataclass
 
 from src.sim.costs import CostModel, DEFAULT_COSTS
-
-
-# Default risk settings (can be overridden per strategy)
-DEFAULT_MAX_RISK_DOLLARS = 300.0
+from src.config import DEFAULT_MAX_RISK_DOLLARS
 
 
 @dataclass
