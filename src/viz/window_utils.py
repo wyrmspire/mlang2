@@ -43,7 +43,7 @@ def enforce_2hour_window(
         window_end = exit_time + timedelta(hours=2)
     else:
         # Estimate exit time from bars_held (assume 1-minute bars)
-        exit_time_est = entry_time + timedelta(minutes=bars_held)
+        exit_time_est = entry_time + timedelta(minutes=int(bars_held))
         window_end = exit_time_est + timedelta(hours=2)
     
     # Filter data

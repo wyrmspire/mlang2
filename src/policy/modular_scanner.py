@@ -7,7 +7,7 @@ Wraps Triggers to provide a standard Scanner interface.
 from typing import Dict, Any, Optional
 import inspect
 
-from src.policy.scanners import Scanner, ScannerResult
+from src.policy.scanners import Scanner, ScanResult
 from src.policy.triggers import Trigger, trigger_from_dict
 from src.policy.triggers.base import TriggerDirection
 
@@ -29,11 +29,11 @@ class ModularScanner(Scanner):
     def scanner_id(self) -> str:
         return f"modular_{self._trigger.trigger_id}"
     
-    def scan(self, state, features, **kwargs) -> ScannerResult:
+    def scan(self, state, features, **kwargs) -> ScanResult:
         # Check cooldown
         current_idx = features.bar_idx if hasattr(features, 'bar_idx') else 0
         if current_idx - self._last_trigger_idx < self._cooldown_bars:
-            return ScannerResult(scanner_id=self.scanner_id, triggered=False)
+            return ScanResult(scanner_id=self.scanner_id, triggered=False)
         
         # Check if trigger.check accepts kwargs
         sig = inspect.signature(self._trigger.check)
@@ -47,7 +47,7 @@ class ModularScanner(Scanner):
         
         if res.triggered:
             self._last_trigger_idx = current_idx
-            return ScannerResult(
+            return ScanResult(
                 scanner_id=self.scanner_id,
                 triggered=True,
                 context={
@@ -57,7 +57,7 @@ class ModularScanner(Scanner):
                 }
             )
         
-        return ScannerResult(scanner_id=self.scanner_id, triggered=False)
+        return ScanResult(scanner_id=self.scanner_id, triggered=False)
 
     def reset(self):
         self._trigger.reset()

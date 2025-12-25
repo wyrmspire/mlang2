@@ -8,7 +8,7 @@ from typing import Optional, Dict, Any
 from dataclasses import dataclass
 from zoneinfo import ZoneInfo
 
-from src.policy.scanners import Scanner, ScannerResult
+from src.policy.scanners import Scanner, ScanResult
 from src.features.state import MarketState
 from src.features.pipeline import FeatureBundle
 from src.config import NY_TZ
@@ -49,10 +49,10 @@ class SimpleTimeScanner(Scanner):
         self,
         state: MarketState,
         features: FeatureBundle
-    ) -> ScannerResult:
+    ) -> ScanResult:
         t = features.timestamp
         if t is None:
-            return ScannerResult(scanner_id=self.scanner_id, triggered=False)
+            return ScanResult(scanner_id=self.scanner_id, triggered=False)
         
         ny_time = t.astimezone(NY_TZ)
         
@@ -60,7 +60,7 @@ class SimpleTimeScanner(Scanner):
         if ny_time.hour == self.hour and ny_time.minute == self.minute:
             # Check if we already traded today
             if self._state.last_trigger_date == ny_time.date():
-                return ScannerResult(scanner_id=self.scanner_id, triggered=False)
+                return ScanResult(scanner_id=self.scanner_id, triggered=False)
             
             # Helper to get price N minutes ago
             # features.x_price_1m is a numpy array of recent close prices
@@ -72,7 +72,7 @@ class SimpleTimeScanner(Scanner):
             
             if prices is None or len(prices) < self.momentum_minutes:
                 # Not enough data
-                return ScannerResult(scanner_id=self.scanner_id, triggered=False)
+                return ScanResult(scanner_id=self.scanner_id, triggered=False)
             
             current_price = float(features.current_price)
             past_price = float(prices[-(self.momentum_minutes + 1)]) # Approximate
@@ -81,7 +81,7 @@ class SimpleTimeScanner(Scanner):
             
             self._state.last_trigger_date = ny_time.date()
             
-            return ScannerResult(
+            return ScanResult(
                 scanner_id=self.scanner_id,
                 triggered=True,
                 context={
@@ -93,4 +93,4 @@ class SimpleTimeScanner(Scanner):
                 score=1.0
             )
             
-        return ScannerResult(scanner_id=self.scanner_id, triggered=False)
+        return ScanResult(scanner_id=self.scanner_id, triggered=False)

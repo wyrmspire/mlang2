@@ -12,7 +12,7 @@ from src.features.pipeline import FeatureBundle
 
 
 @dataclass
-class ScannerResult:
+class ScanResult:
     """Result from a scanner check."""
     scanner_id: str
     triggered: bool
@@ -39,7 +39,7 @@ class Scanner(ABC):
         self,
         state: MarketState,
         features: FeatureBundle
-    ) -> ScannerResult:
+    ) -> ScanResult:
         """
         Check if current state triggers this scanner.
         
@@ -48,7 +48,7 @@ class Scanner(ABC):
             features: Computed features
             
         Returns:
-            ScannerResult with triggered flag and context
+            ScanResult with triggered flag and context
         """
         pass
 
@@ -67,8 +67,8 @@ class AlwaysScanner(Scanner):
         self,
         state: MarketState,
         features: FeatureBundle
-    ) -> ScannerResult:
-        return ScannerResult(
+    ) -> ScanResult:
+        return ScanResult(
             scanner_id=self.scanner_id,
             triggered=True,
             score=1.0
@@ -92,18 +92,18 @@ class IntervalScanner(Scanner):
         self,
         state: MarketState,
         features: FeatureBundle
-    ) -> ScannerResult:
+    ) -> ScanResult:
         bar_idx = features.bar_idx
         
         if bar_idx - self._last_triggered >= self.interval:
             self._last_triggered = bar_idx
-            return ScannerResult(
+            return ScanResult(
                 scanner_id=self.scanner_id,
                 triggered=True,
                 score=1.0
             )
         
-        return ScannerResult(
+        return ScanResult(
             scanner_id=self.scanner_id,
             triggered=False
         )
@@ -130,9 +130,9 @@ class LevelProximityScanner(Scanner):
         self,
         state: MarketState,
         features: FeatureBundle
-    ) -> ScannerResult:
+    ) -> ScanResult:
         if features.levels is None or features.atr <= 0:
-            return ScannerResult(scanner_id=self.scanner_id, triggered=False)
+            return ScanResult(scanner_id=self.scanner_id, triggered=False)
         
         levels = features.levels
         atr = features.atr
@@ -159,7 +159,7 @@ class LevelProximityScanner(Scanner):
         
         triggered = min_dist_atr <= self.atr_threshold
         
-        return ScannerResult(
+        return ScanResult(
             scanner_id=self.scanner_id,
             triggered=triggered,
             context={
@@ -191,9 +191,9 @@ class RSIExtremeScanner(Scanner):
         self,
         state: MarketState,
         features: FeatureBundle
-    ) -> ScannerResult:
+    ) -> ScanResult:
         if features.indicators is None:
-            return ScannerResult(scanner_id=self.scanner_id, triggered=False)
+            return ScanResult(scanner_id=self.scanner_id, triggered=False)
         
         rsi = features.indicators.rsi_5m_14
         
@@ -201,7 +201,7 @@ class RSIExtremeScanner(Scanner):
         overbought = rsi >= self.overbought
         triggered = oversold or overbought
         
-        return ScannerResult(
+        return ScanResult(
             scanner_id=self.scanner_id,
             triggered=triggered,
             context={
@@ -283,7 +283,7 @@ class ScriptScanner(Scanner):
         self,
         state: MarketState,
         features: FeatureBundle
-    ) -> ScannerResult:
+    ) -> ScanResult:
         """
         Call the script's scan function with current state.
         
@@ -323,7 +323,7 @@ class ScriptScanner(Scanner):
                 triggered = signal is not None
                 context = signal or {}
             
-            return ScannerResult(
+            return ScanResult(
                 scanner_id=self.scanner_id,
                 triggered=triggered,
                 context=context,
@@ -331,7 +331,7 @@ class ScriptScanner(Scanner):
             )
         except Exception as e:
             # Log error but don't crash - allows graceful degradation
-            return ScannerResult(
+            return ScanResult(
                 scanner_id=self.scanner_id,
                 triggered=False,
                 context={'error': str(e)}

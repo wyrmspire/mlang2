@@ -23,6 +23,8 @@ from src.data.resample import resample_all_timeframes
 from src.sim.stepper import MarketStepper
 from src.sim.oco_engine import create_oco_bracket
 from src.sim.sizing import calculate_contracts, calculate_pnl_dollars
+from src.sim.causal_runner import CausalExecutor, StepResult
+from src.sim.account_manager import AccountManager
 from src.features.pipeline import compute_features, precompute_indicators
 from src.policy.scanners import get_scanner
 from src.policy.filters import DEFAULT_FILTERS
@@ -123,47 +125,96 @@ def run_experiment(
     print("Generating decision records...")
     stepper = MarketStepper(df, start_idx=200, end_idx=len(df) - 200)
     scanner = get_scanner(config.scanner_id, **config.scanner_params)
-    labeler = Labeler(config.label_config)
+    
+    # CRITICAL: Ensure labeler uses the SAME oco_config as viz export
+    # Otherwise bars_held will mismatch the displayed TP/SL levels
+    label_config = config.label_config
+    label_config.oco_config = config.oco_config  # Override to ensure consistency
+    labeler = Labeler(label_config)
+    
     cooldown = CooldownManager()
+    
+    # Initialize Causal Executor
+    # Note: Experiment runner uses its own strict stepper, so we pass it in.
+    # We also use a dummy AccountManager as we are just checking for signals/records here.
+    account_manager = AccountManager()
+    executor = CausalExecutor(
+        df=df,
+        stepper=stepper,
+        account_manager=account_manager,
+        scanner=scanner,
+        feature_config=config.feature_config,
+        df_5m=df_5m,
+        df_15m=df_15m,
+        precomputed_indicators=indicators_map
+    )
     
     records: List[DecisionRecord] = []
     
     while True:
-        step = stepper.step()
-        if step.is_done:
+        # Step the unified executor
+        result = executor.step()
+        if not result:
             break
+            
+        # If scanner triggered, we have a potential record
+        # In CausalExecutor, triggers are in result.scanner_triggers and result.new_orders
+        # We need to map this back to DecisionRecord format.
         
-        # Compute features
-        features = compute_features(
-            stepper,
-            config.feature_config,
-            df_5m=df_5m,
-            df_15m=df_15m,
-            precomputed_indicators=indicators_map,
-        )
+        # We only care if meaningful decision occurred (scanner checked)
+        # CausalExecutor runs scanner every step if provided.
+        # But we only want to RECORD if it triggered or if we want negative samples?
+        # The original code recorded ONLY IF skip_reason != SKIP (or if it was filter blocked).
+        # Actually original code recorded ALL scan attempts that passed basic checks?
+        # Original: "if not scan_result.triggered: continue"
         
-        # Check if scanner triggers
-        scan_result = scanner.scan(features.market_state, features)
-        if not scan_result.triggered:
+        # So we check if triggered.
+        if not result.scanner_triggers:
             continue
+            
+        # Extract the first trigger (assuming one per bar for now)
+        trigger = result.scanner_triggers[0]
+        # And the bracket (order) if any
+        bracket_ref = result.new_orders[0] if result.new_orders else None
+        
+        # Features are available in result
+        features = result.features
+        
+        # Re-verify filters/cooldown using the centralized logic or here?
+        # CausalExecutor creates the order if triggered. It doesn't check "cooldown" from policy/cooldown.py
+        # because that's a higher-level policy. 
+        # Wait, if CausalExecutor creates the order, it implies it passed checks?
+        # The current CausalExecutor implementation is bare-bones: Trigger -> Order.
+        # It misses the Filter/Cooldown/Skip logic from the old runner.
+        
+        # To maintain exact parity, we should move Filter/Cooldown INTO CausalExecutor?
+        # Or check it here and "Cancel" the order?
+        # FOR NOW: We will re-implement the check here to decide SKIP vs PLACE, matching old runner.
+        # Ideally, CausalExecutor should take a 'Policy' object that handles this.
         
         # Check filters
         filter_result = DEFAULT_FILTERS.check(features)
         if not filter_result.passed:
             skip_reason = SkipReason.FILTER_BLOCK
         # Check cooldown
-        elif cooldown.is_on_cooldown(step.bar_idx, features.timestamp)[0]:
+        elif cooldown.is_on_cooldown(result.bar_idx, result.timestamp)[0]:
             skip_reason = SkipReason.COOLDOWN
         else:
             skip_reason = SkipReason.NOT_SKIPPED
+            
+        # Determine Action
+        action = Action.NO_TRADE if skip_reason != SkipReason.NOT_SKIPPED else Action.PLACE_ORDER
+        
+        # If we skipped, we technically "cancelled" the order the executor made.
+        # But for 'Generating Data', we just record the decision.
         
         # Create record
         record = DecisionRecord(
-            timestamp=features.timestamp,
-            bar_idx=step.bar_idx,
+            timestamp=result.timestamp,
+            bar_idx=result.bar_idx,
             decision_id=str(uuid.uuid4())[:8],
             scanner_id=config.scanner_id,
-            action=Action.NO_TRADE if skip_reason != SkipReason.NOT_SKIPPED else Action.PLACE_ORDER,
+            action=action,
             skip_reason=skip_reason,
             x_price_1m=features.x_price_1m,
             x_price_5m=features.x_price_5m,
@@ -173,8 +224,10 @@ def run_experiment(
             atr=features.atr,
         )
         
-        # 3. Label with counterfactual outcome
-        cf_label = labeler.label_decision_point(df, step.bar_idx, features.atr)
+        # 3. Label with counterfactual outcome (TRAINING/DATA GEN ONLY)
+        # This is the "Lookahead" step that we keep ONLY for data generation.
+        # It uses the Labeler to jump ahead and see what happened.
+        cf_label = labeler.label_decision_point(df, result.bar_idx, features.atr)
         record.cf_outcome = cf_label.outcome
         record.cf_pnl = cf_label.pnl
         record.cf_pnl_dollars = cf_label.pnl_dollars
@@ -186,9 +239,8 @@ def run_experiment(
         
         records.append(record)
         
-        # === VIZ EXPORT HOOK ===
         if exporter:
-            curr_idx = step.bar_idx
+            curr_idx = result.bar_idx
             
             exit_time = None
             if record.action == Action.PLACE_ORDER:
@@ -249,12 +301,12 @@ def run_experiment(
         
         # Update cooldown if trade placed
         if record.action == Action.PLACE_ORDER:
-            cooldown.record_trade(step.bar_idx, cf_label.outcome, features.timestamp)
+            cooldown.record_trade(result.bar_idx, cf_label.outcome, features.timestamp)
             
-            # Export Trade Record for Viz
+            # Export Trade Record for Viz (Constructed from CF outcome)
             if exporter:
                 # Approximate exit bar
-                exit_bar = step.bar_idx + record.cf_bars_held
+                exit_bar = result.bar_idx + record.cf_bars_held
                 exit_time = features.timestamp + pd.Timedelta(minutes=record.cf_bars_held)
                 
                 bracket = create_oco_bracket(
@@ -281,7 +333,7 @@ def run_experiment(
                     trade_id=str(uuid.uuid4())[:8],
                     decision_id=record.decision_id,
                     entry_time=features.timestamp,
-                    entry_bar=step.bar_idx,
+                    entry_bar=result.bar_idx,
                     entry_price=features.current_price,
                     direction=config.oco_config.direction,
                     exit_time=exit_time,

@@ -8,7 +8,7 @@ import numpy as np
 from typing import Optional, Dict, Any
 from dataclasses import dataclass
 
-from src.policy.scanners import Scanner, ScannerResult
+from src.policy.scanners import Scanner, ScanResult
 from src.features.state import MarketState
 from src.features.pipeline import FeatureBundle
 
@@ -128,7 +128,7 @@ class SwingBreakoutScanner(Scanner):
         state: MarketState,
         features: FeatureBundle,
         df_15m: pd.DataFrame = None
-    ) -> ScannerResult:
+    ) -> ScanResult:
         """
         Check for swing breakout.
         
@@ -136,21 +136,21 @@ class SwingBreakoutScanner(Scanner):
         """
         t = features.timestamp
         if t is None:
-            return ScannerResult(scanner_id=self.scanner_id, triggered=False)
+            return ScanResult(scanner_id=self.scanner_id, triggered=False)
         
         # Cooldown check
         if features.bar_idx - self._state.last_trigger_bar < self.cooldown_bars:
-            return ScannerResult(scanner_id=self.scanner_id, triggered=False)
+            return ScanResult(scanner_id=self.scanner_id, triggered=False)
         
         # Need 15m data for swing computation
         if df_15m is None or df_15m.empty:
-            return ScannerResult(scanner_id=self.scanner_id, triggered=False)
+            return ScanResult(scanner_id=self.scanner_id, triggered=False)
         
         # Compute swing levels
         swing_high, swing_low, _, _ = self._compute_swing_levels(df_15m, t)
         
         if swing_high == 0 or swing_low == 0:
-            return ScannerResult(scanner_id=self.scanner_id, triggered=False)
+            return ScanResult(scanner_id=self.scanner_id, triggered=False)
         
         # Update state
         self._state.last_swing_high = swing_high
@@ -186,7 +186,7 @@ class SwingBreakoutScanner(Scanner):
             
             self._state.last_trigger_bar = features.bar_idx
             
-            return ScannerResult(
+            return ScanResult(
                 scanner_id=self.scanner_id,
                 triggered=True,
                 context={
@@ -203,4 +203,4 @@ class SwingBreakoutScanner(Scanner):
                 score=1.0
             )
         
-        return ScannerResult(scanner_id=self.scanner_id, triggered=False)
+        return ScanResult(scanner_id=self.scanner_id, triggered=False)

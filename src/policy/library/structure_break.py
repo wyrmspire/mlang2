@@ -15,7 +15,7 @@ from typing import Optional, List
 from dataclasses import dataclass, field
 from datetime import time
 
-from src.policy.scanners import Scanner, ScannerResult
+from src.policy.scanners import Scanner, ScanResult
 from src.features.state import MarketState
 from src.features.pipeline import FeatureBundle
 from src.config import POINT_VALUE, TICK_SIZE
@@ -162,25 +162,25 @@ class StructureBreakScanner(Scanner):
         state: MarketState,
         features: FeatureBundle,
         df_15m: pd.DataFrame = None
-    ) -> ScannerResult:
+    ) -> ScanResult:
         """Check for structure break pattern."""
         t = features.timestamp
         if t is None:
-            return ScannerResult(scanner_id=self.scanner_id, triggered=False)
+            return ScanResult(scanner_id=self.scanner_id, triggered=False)
         
         # Cooldown check
         if features.bar_idx - self._state.last_trigger_bar < self.cooldown_bars:
-            return ScannerResult(scanner_id=self.scanner_id, triggered=False)
+            return ScanResult(scanner_id=self.scanner_id, triggered=False)
         
         if df_15m is None or df_15m.empty:
-            return ScannerResult(scanner_id=self.scanner_id, triggered=False)
+            return ScanResult(scanner_id=self.scanner_id, triggered=False)
         
         # Update swing structure
         self._state.swing_highs, self._state.swing_lows = self._find_swings(df_15m, features.bar_idx)
         
         # Need at least 3 swing highs and 3 swing lows
         if len(self._state.swing_highs) < 3 or len(self._state.swing_lows) < 3:
-            return ScannerResult(scanner_id=self.scanner_id, triggered=False)
+            return ScanResult(scanner_id=self.scanner_id, triggered=False)
         
         # Get current bar data
         current_bar = df_15m.iloc[-1]
@@ -221,7 +221,7 @@ class StructureBreakScanner(Scanner):
                         if contracts > 0:
                             self._state.last_trigger_bar = features.bar_idx
                             
-                            return ScannerResult(
+                            return ScanResult(
                                 scanner_id=self.scanner_id,
                                 triggered=True,
                                 context={
@@ -270,7 +270,7 @@ class StructureBreakScanner(Scanner):
                         if contracts > 0:
                             self._state.last_trigger_bar = features.bar_idx
                             
-                            return ScannerResult(
+                            return ScanResult(
                                 scanner_id=self.scanner_id,
                                 triggered=True,
                                 context={
@@ -292,4 +292,4 @@ class StructureBreakScanner(Scanner):
                                 score=1.0
                             )
         
-        return ScannerResult(scanner_id=self.scanner_id, triggered=False)
+        return ScanResult(scanner_id=self.scanner_id, triggered=False)

@@ -8,7 +8,7 @@ from typing import Optional, Dict, Any
 from dataclasses import dataclass, field
 from zoneinfo import ZoneInfo
 
-from src.policy.scanners import Scanner, ScannerResult
+from src.policy.scanners import Scanner, ScanResult
 from src.features.state import MarketState
 from src.features.pipeline import FeatureBundle
 from src.config import NY_TZ
@@ -94,10 +94,10 @@ class OpeningRangeScanner(Scanner):
         self,
         state: MarketState,
         features: FeatureBundle
-    ) -> ScannerResult:
+    ) -> ScanResult:
         t = features.timestamp
         if t is None:
-            return ScannerResult(scanner_id=self.scanner_id, triggered=False)
+            return ScanResult(scanner_id=self.scanner_id, triggered=False)
         
         # Reset on new day
         if self._is_new_day(t):
@@ -111,7 +111,7 @@ class OpeningRangeScanner(Scanner):
                 'low': state.current_low if hasattr(state, 'current_low') else features.current_price - 1,
             }
             self._or_bars.append(bar_data)
-            return ScannerResult(scanner_id=self.scanner_id, triggered=False)
+            return ScanResult(scanner_id=self.scanner_id, triggered=False)
         
         # Establish OR after period ends
         if self._is_after_or(t) and not self._state.or_established and len(self._or_bars) > 0:
@@ -121,11 +121,11 @@ class OpeningRangeScanner(Scanner):
         
         # Can't trigger if OR not established
         if not self._state.or_established:
-            return ScannerResult(scanner_id=self.scanner_id, triggered=False)
+            return ScanResult(scanner_id=self.scanner_id, triggered=False)
         
         # Cooldown check
         if features.bar_idx - self._state.last_trigger_bar < self.cooldown_bars:
-            return ScannerResult(scanner_id=self.scanner_id, triggered=False)
+            return ScanResult(scanner_id=self.scanner_id, triggered=False)
         
         # Check for retest
         price = features.current_price
@@ -149,7 +149,7 @@ class OpeningRangeScanner(Scanner):
         
         if long_triggered or short_triggered:
             self._state.last_trigger_bar = features.bar_idx
-            return ScannerResult(
+            return ScanResult(
                 scanner_id=self.scanner_id,
                 triggered=True,
                 context={
@@ -162,4 +162,4 @@ class OpeningRangeScanner(Scanner):
                 score=1.0
             )
         
-        return ScannerResult(scanner_id=self.scanner_id, triggered=False)
+        return ScanResult(scanner_id=self.scanner_id, triggered=False)

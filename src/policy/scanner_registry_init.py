@@ -26,8 +26,8 @@ class AlwaysScannerWrapper:
     def scan(self, step_result):
         # Adapt to registry interface
         # In real use, would extract state and features from step_result
-        from src.policy.scanners import ScannerResult
-        return ScannerResult(
+        from src.policy.scanners import ScanResult
+        return ScanResult(
             scanner_id="always",
             triggered=True,
             score=1.0
@@ -48,9 +48,9 @@ class IntervalScannerWrapper:
         self._scanner = IntervalScanner(interval=interval)
     
     def scan(self, step_result):
-        from src.policy.scanners import ScannerResult
+        from src.policy.scanners import ScanResult
         # Simplified - real implementation would extract features
-        return ScannerResult(
+        return ScanResult(
             scanner_id=f"interval_{self._scanner.interval}",
             triggered=False,  # Placeholder
             score=0.0
@@ -83,9 +83,8 @@ class ModularScannerWrapper:
         )
     
     def scan(self, step_result):
-        from src.policy.scanners import ScannerResult
-        # Simplified - real implementation would extract features
-        return ScannerResult(
+        from src.policy.scanners import ScanResult
+        return ScanResult(
             scanner_id=self._scanner.scanner_id,
             triggered=False,  # Placeholder
             score=0.0

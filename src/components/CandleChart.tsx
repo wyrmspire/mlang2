@@ -17,8 +17,8 @@ interface CandleChartProps {
     trade: VizTrade | null;                 // Active trade for position box
     trades?: VizTrade[];                    // All trades for overlay mode
     simulationOco?: SimulationOco | null;   // OCO state for simulation mode
-    forceShowAllTrades?: boolean;           // Force showing all trades
-    defaultShowAllTrades?: boolean;         // Default state for showing all trades
+    // NOTE: forceShowAllTrades and defaultShowAllTrades were REMOVED
+    // The "Show All Trades" feature had broken bars_held parsing
 }
 
 type Timeframe = '1m' | '5m' | '15m' | '1h' | '4h';
@@ -112,8 +112,6 @@ export const CandleChart: React.FC<CandleChartProps> = ({
     trade,
     trades = [],
     simulationOco,
-    forceShowAllTrades = false,
-    defaultShowAllTrades = false
 }) => {
     const chartContainerRef = useRef<HTMLDivElement>(null);
     const chartRef = useRef<IChartApi | null>(null);
@@ -121,17 +119,12 @@ export const CandleChart: React.FC<CandleChartProps> = ({
 
     // References for position box primitives
     const activeBoxesRef = useRef<PositionBox[]>([]);
-    const allTradesBoxesRef = useRef<Map<string, PositionBox[]>>(new Map());
+    // NOTE: allTradesBoxesRef was REMOVED - "Show All Trades" feature was broken
     const simOcoBoxesRef = useRef<PositionBox[]>([]);
-    const simPriceLinesRef = useRef<any[]>([]); // Store price line objects
+    const simPriceLinesRef = useRef<any[]>([]);
 
     const [timeframe, setTimeframe] = useState<Timeframe>('1m');
     const [isLoading, setIsLoading] = useState(true);
-    const [showAllTrades, setShowAllTrades] = useState(defaultShowAllTrades);
-
-    useEffect(() => {
-        setShowAllTrades(defaultShowAllTrades);
-    }, [defaultShowAllTrades]);
 
     // Process continuous data with current timeframe
     const chartData = useMemo(() => {
@@ -230,12 +223,6 @@ export const CandleChart: React.FC<CandleChartProps> = ({
                 try { seriesRef.current?.detachPrimitive(box); } catch { }
             });
             activeBoxesRef.current = [];
-            allTradesBoxesRef.current.forEach(boxes => {
-                boxes.forEach(box => {
-                    try { seriesRef.current?.detachPrimitive(box); } catch { }
-                });
-            });
-            allTradesBoxesRef.current.clear();
             chart.remove();
         };
     }, []);
@@ -265,108 +252,145 @@ export const CandleChart: React.FC<CandleChartProps> = ({
         seriesRef.current.setMarkers(decisionMarkers);
     }, [decisionMarkers]);
 
-    // Render all trades as position boxes
+    // ========================================
+    // SHOW ALL TRADE BOXES ON LOAD - FIXED 2025-12-25
+    // ========================================
+    // This useEffect renders position boxes (TP/SL zones) for ALL trades on the chart.
+    //
+    // CRITICAL DEPENDENCIES:
+    // - decisions: Re-run when decision data changes
+    // - trades: Re-run when trade data changes (for exit_time/bars_held)
+    // - aggregatedBars: Re-run when bar data changes (for timestamp lookups)
+    // - continuousData: Re-run when raw data loads
+    // - chartData: Re-run when chart data is set (ensures chart is ready)
+    // - isLoading: Re-run after loading completes
+    // - timeframe: CRITICAL - must re-run when timeframe changes so boxes align correctly
+    //
+    // PREVIOUS BUG: The old "Show All Trades" toggle had broken bars_held parsing
+    // (string vs number types) that caused boxes to extend past actual TP/SL hits.
+    // This was fixed by using the same endTime calculation as the active decision path.
+    // ========================================
+    const allTradesBoxesRef = useRef<PositionBox[]>([]);
+
     useEffect(() => {
-        const shouldShowAll = showAllTrades || forceShowAllTrades;
-        const intervalMap: Record<Timeframe, number> = { '1m': 1, '5m': 5, '15m': 15, '1h': 60, '4h': 240 };
-        const interval = intervalMap[timeframe];
+        console.log('[ALL_TRADES] useEffect running, timeframe:', timeframe, 'decisions:', decisions.length, 'trades:', trades.length);
 
-        if (!seriesRef.current) return;
+        if (!seriesRef.current || !chartRef.current) {
+            console.log('[ALL_TRADES] No chart/series ref');
+            return;
+        }
+        if (!aggregatedBars.length || !continuousData?.bars?.length) {
+            console.log('[ALL_TRADES] No bars');
+            return;
+        }
 
-        // Always clear first to handle updates or toggling off
-        allTradesBoxesRef.current.forEach(boxes => {
-            boxes.forEach(box => {
-                try { seriesRef.current?.detachPrimitive(box); } catch { }
-            });
+        // Clear old boxes - MUST do this on every timeframe change
+        console.log('[ALL_TRADES] Clearing', allTradesBoxesRef.current.length, 'old boxes');
+        allTradesBoxesRef.current.forEach(box => {
+            try { seriesRef.current?.detachPrimitive(box); } catch { }
         });
-        allTradesBoxesRef.current.clear();
+        allTradesBoxesRef.current = [];
 
-        if (!shouldShowAll) return;
-        if (!aggregatedBars.length || !continuousData?.bars?.length) return;
+        // Get all decisions with OCO data
+        const decisionsWithOco = decisions.filter(d => d.oco && d.timestamp);
+        console.log('[ALL_TRADES] Decisions with OCO:', decisionsWithOco.length);
+        if (!decisionsWithOco.length) return;
 
-        // Use decisions directly instead of trades to bypass backend mapping issues
-        const itemsToRender = decisions.filter(d => d.oco && d.timestamp);
-        if (!itemsToRender.length) return;
+        const newBoxes: PositionBox[] = [];
 
-        // Create boxes for each decision with OCO data
-        itemsToRender.forEach((decision, idx) => {
+        decisionsWithOco.forEach((decision, idx) => {
             const oco = decision.oco;
             if (!oco?.entry_price || !oco?.stop_price || !oco?.tp_price) return;
 
-            // ========================================
-            // FIX: Use decision's timestamp directly, not continuousData lookup
-            // This ensures alignment even when continuousData doesn't include premkt
-            // ========================================
-            const startTime = parseTime(decision.timestamp) as Time;
+            // Find matching trade for this decision (for exit_time/bars_held)
+            const matchingTrade = trades.find(t => t.decision_id === decision.decision_id);
 
-            // Calculate end time using bars_held from oco_results if available
-            // Support both flat format (ifvg_debug) and nested format (older scans)
-            const ocoResults = decision.oco_results as any || {};
-            let barsHeld = 30; // Fallback
-
-            if (typeof ocoResults.bars_held === 'number') {
-                // Flat format (ifvg_debug, new scans)
-                barsHeld = ocoResults.bars_held;
-            } else if (typeof ocoResults === 'object') {
-                // Nested format - check first value
-                const firstVal = Object.values(ocoResults)[0];
-                if (firstVal && typeof firstVal === 'object' && 'bars_held' in (firstVal as object)) {
-                    barsHeld = (firstVal as { bars_held: number }).bars_held;
-                }
-            }
-
-            // Compute endTime by adding bars_held minutes to startTime
-            // bars_held is in 1-minute bars, so add that many minutes
-            const startDate = new Date(decision.timestamp);
-            const endDate = new Date(startDate.getTime() + barsHeld * 60 * 1000);
-            const endTime = parseTime(endDate.toISOString()) as Time;
-
+            const entryPrice = oco.entry_price;
+            const stopPrice = oco.stop_price;
+            const tpPrice = oco.tp_price;
             const direction = (decision.scanner_context?.direction || oco.direction || 'LONG') as 'LONG' | 'SHORT';
 
-            // Format labels with dynamic risk info
-            const contracts = decision.contracts || decision.scanner_context?.contracts || 1;
-            const riskDollars = decision.risk_dollars || decision.scanner_context?.risk_dollars;
-            const rewardDollars = decision.reward_dollars || decision.scanner_context?.reward_dollars;
+            // ========================================
+            // CRITICAL: Snap times to nearest ACTUAL bars on the chart
+            // timeToCoordinate returns null if the exact time doesn't exist
+            // On 5m bars, 09:39 doesn't exist - only 09:35, 09:40, etc.
+            // So we find the nearest bar and use ITS time
+            // ========================================
+            const startBarIdx = findBarIndex(aggregatedBars, decision.timestamp!);
+            const startBar = aggregatedBars[startBarIdx];
+            if (!startBar) return;  // Skip if no matching bar found
 
-            const riskStr = riskDollars
-                ? `-$${Math.round(riskDollars)} (${contracts}x)`
-                : '';
-            const rewardStr = rewardDollars
-                ? `+$${Math.round(rewardDollars)}`
-                : '';
+            const startTime = parseTime(startBar.time) as Time;
 
+            // End time calculation - snap to nearest bar
+            let endTime = startTime;
+
+            if (matchingTrade?.exit_time) {
+                // Find the bar at or after exit time
+                const endBarIdx = findBarIndex(aggregatedBars, matchingTrade.exit_time);
+                const endBar = aggregatedBars[endBarIdx];
+                if (endBar) {
+                    endTime = parseTime(endBar.time) as Time;
+                }
+            } else if (matchingTrade?.bars_held) {
+                // bars_held is in 1-minute bars - need to convert to current timeframe
+                const intervalMinutes = { '1m': 1, '5m': 5, '15m': 15, '1h': 60, '4h': 240 }[timeframe] || 1;
+                const barsOnThisTF = Math.max(1, Math.ceil(matchingTrade.bars_held / intervalMinutes));
+                const endBarIdx = Math.min(startBarIdx + barsOnThisTF, aggregatedBars.length - 1);
+                const endBar = aggregatedBars[endBarIdx];
+                if (endBar) {
+                    endTime = parseTime(endBar.time) as Time;
+                }
+            } else if (oco.max_bars) {
+                // Fallback: use max_bars converted to current timeframe
+                const intervalMinutes = { '1m': 1, '5m': 5, '15m': 15, '1h': 60, '4h': 240 }[timeframe] || 1;
+                const barsOnThisTF = Math.max(1, Math.ceil(oco.max_bars / intervalMinutes));
+                const endBarIdx = Math.min(startBarIdx + barsOnThisTF, aggregatedBars.length - 1);
+                const endBar = aggregatedBars[endBarIdx];
+                if (endBar) {
+                    endTime = parseTime(endBar.time) as Time;
+                }
+            } else {
+                // Default: 50 minutes converted to bars
+                const intervalMinutes = { '1m': 1, '5m': 5, '15m': 15, '1h': 60, '4h': 240 }[timeframe] || 1;
+                const barsOnThisTF = Math.max(1, Math.ceil(50 / intervalMinutes));
+                const endBarIdx = Math.min(startBarIdx + barsOnThisTF, aggregatedBars.length - 1);
+                const endBar = aggregatedBars[endBarIdx];
+                if (endBar) {
+                    endTime = parseTime(endBar.time) as Time;
+                }
+            }
             const { slBox, tpBox } = createTradePositionBoxes(
-                oco.entry_price,
-                oco.stop_price,
-                oco.tp_price,
+                entryPrice,
+                stopPrice,
+                tpPrice,
                 startTime,
                 endTime,
                 direction,
-                decision.decision_id || `dec_${idx}`,
-                { sl: riskStr, tp: rewardStr }
+                decision.decision_id || `all_${idx}`
             );
 
-            // Attach boxes
             seriesRef.current?.attachPrimitive(slBox);
             seriesRef.current?.attachPrimitive(tpBox);
-
-            allTradesBoxesRef.current.set(decision.decision_id || `dec_${idx}`, [slBox, tpBox]);
+            newBoxes.push(slBox, tpBox);
+            console.log('[ALL_TRADES] Attached boxes, total now:', newBoxes.length);
         });
 
-    }, [showAllTrades, forceShowAllTrades, decisions, aggregatedBars, continuousData, timeframe]);
+        allTradesBoxesRef.current = newBoxes;
+        console.log('[ALL_TRADES] Done! Created', newBoxes.length, 'boxes total');
+
+    }, [decisions, trades, aggregatedBars, continuousData, chartData, isLoading, timeframe]);
 
     // Handle active decision - scroll to it and show position boxes
     useEffect(() => {
         if (!seriesRef.current || !chartRef.current) return;
         if (!aggregatedBars.length || !continuousData?.bars?.length) return;
 
-        // Remove old active position boxes (unless showing all trades)
-        if (!showAllTrades) {
-            activeBoxesRef.current.forEach(box => {
-                try { seriesRef.current?.detachPrimitive(box); } catch { }
-            });
-            activeBoxesRef.current = [];
-        }
+        // Remove old active position boxes
+        activeBoxesRef.current.forEach(box => {
+            try { seriesRef.current?.detachPrimitive(box); } catch { }
+        });
+        activeBoxesRef.current = [];
 
         // If no active decision, just clear boxes
         if (!activeDecision?.timestamp) return;
@@ -421,28 +445,25 @@ export const CandleChart: React.FC<CandleChartProps> = ({
                 endTime = Math.floor(endTimeMs / 1000) as Time;
             }
 
-            // Only show active trade boxes if not showing all trades
-            if (!showAllTrades) {
-                // Create position boxes with actual timestamps
-                const { slBox, tpBox } = createTradePositionBoxes(
-                    entryPrice,
-                    stopPrice,
-                    tpPrice,
-                    startTime,
-                    endTime,
-                    direction,
-                    activeDecision.decision_id
-                );
+            // Create position boxes with actual timestamps
+            const { slBox, tpBox } = createTradePositionBoxes(
+                entryPrice,
+                stopPrice,
+                tpPrice,
+                startTime,
+                endTime,
+                direction,
+                activeDecision.decision_id
+            );
 
-                // Attach primitives to series
-                seriesRef.current.attachPrimitive(slBox);
-                seriesRef.current.attachPrimitive(tpBox);
+            // Attach primitives to series
+            seriesRef.current.attachPrimitive(slBox);
+            seriesRef.current.attachPrimitive(tpBox);
 
-                activeBoxesRef.current = [slBox, tpBox];
-            }
+            activeBoxesRef.current = [slBox, tpBox];
         }
 
-    }, [activeDecision, trade, aggregatedBars, timeframe, continuousData, showAllTrades]);
+    }, [activeDecision, trade, aggregatedBars, timeframe, continuousData]);
 
     // Render simulation OCO position boxes
     // Render simulation OCO price lines
@@ -530,19 +551,6 @@ export const CandleChart: React.FC<CandleChartProps> = ({
                         </button>
                     ))}
                 </div>
-
-                {/* Show All Trades Toggle */}
-                {trades.length > 0 && (
-                    <button
-                        onClick={() => setShowAllTrades(!showAllTrades)}
-                        className={`px-3 py-1.5 text-xs font-semibold rounded-md border transition-colors ${showAllTrades
-                            ? 'bg-indigo-600 text-white border-indigo-500'
-                            : 'bg-slate-800 text-slate-400 border-slate-700 hover:bg-slate-700 hover:text-slate-200'
-                            }`}
-                    >
-                        {showAllTrades ? `All Trades (${trades.length})` : 'Show All Trades'}
-                    </button>
-                )}
             </div>
 
             {/* Decision count overlay */}

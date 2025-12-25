@@ -20,7 +20,7 @@ from typing import Optional, Dict, Any
 from dataclasses import dataclass, field
 from datetime import time
 
-from src.policy.scanners import Scanner, ScannerResult
+from src.policy.scanners import Scanner, ScanResult
 from src.features.state import MarketState
 from src.features.pipeline import FeatureBundle
 from src.features.session_levels import (
@@ -216,11 +216,11 @@ class ICTFVGScanner(Scanner):
         features: FeatureBundle,
         df_5m: pd.DataFrame = None,
         df_1m: pd.DataFrame = None
-    ) -> ScannerResult:
+    ) -> ScanResult:
         """Check for ICT FVG setup."""
         t = features.timestamp
         if t is None:
-            return ScannerResult(scanner_id=self.scanner_id, triggered=False)
+            return ScanResult(scanner_id=self.scanner_id, triggered=False)
         
         # 1. Check if we're in the trade window (9:30 - 11:30 NY)
         if not is_in_trade_window(t, NY_TZ):
@@ -229,23 +229,23 @@ class ICTFVGScanner(Scanner):
             if self._state.last_trigger_date != current_date:
                 self.reset()
                 self._state.last_trigger_date = current_date
-            return ScannerResult(scanner_id=self.scanner_id, triggered=False)
+            return ScanResult(scanner_id=self.scanner_id, triggered=False)
         
         # 2. Check if London session is complete (past 8:30)
         if not is_london_complete(t, NY_TZ):
-            return ScannerResult(scanner_id=self.scanner_id, triggered=False)
+            return ScanResult(scanner_id=self.scanner_id, triggered=False)
         
         # 3. Cooldown check
         if features.bar_idx - self._state.last_trigger_bar < self.cooldown_bars:
-            return ScannerResult(scanner_id=self.scanner_id, triggered=False)
+            return ScanResult(scanner_id=self.scanner_id, triggered=False)
         
         # 4. Check if in position (only one trade at a time)
         if self._state.in_position:
-            return ScannerResult(scanner_id=self.scanner_id, triggered=False)
+            return ScanResult(scanner_id=self.scanner_id, triggered=False)
         
         # 5. Need data
         if df_5m is None or df_5m.empty or df_1m is None or df_1m.empty:
-            return ScannerResult(scanner_id=self.scanner_id, triggered=False)
+            return ScanResult(scanner_id=self.scanner_id, triggered=False)
         
         current_price = features.current_price
         atr = features.atr if features.atr > 0 else 5.0
@@ -255,12 +255,12 @@ class ICTFVGScanner(Scanner):
         session_levels = self._state.session_levels
         
         if session_levels is None:
-            return ScannerResult(scanner_id=self.scanner_id, triggered=False)
+            return ScanResult(scanner_id=self.scanner_id, triggered=False)
         
         # Get current bar info
         current_bar = df_5m.iloc[-1] if len(df_5m) > 0 else None
         if current_bar is None:
-            return ScannerResult(scanner_id=self.scanner_id, triggered=False)
+            return ScanResult(scanner_id=self.scanner_id, triggered=False)
         
         current_high = current_bar['high']
         current_low = current_bar['low']
@@ -313,7 +313,7 @@ class ICTFVGScanner(Scanner):
                     risk = current_price - stop_price
                     
                     if risk <= 0:
-                        return ScannerResult(scanner_id=self.scanner_id, triggered=False)
+                        return ScanResult(scanner_id=self.scanner_id, triggered=False)
                     
                     # TP: Use PDH if favorable, otherwise 1:3 RR minimum
                     pdh = features.levels.pdh if features.levels else 0
@@ -330,7 +330,7 @@ class ICTFVGScanner(Scanner):
                     risk = stop_price - current_price
                     
                     if risk <= 0:
-                        return ScannerResult(scanner_id=self.scanner_id, triggered=False)
+                        return ScanResult(scanner_id=self.scanner_id, triggered=False)
                     
                     # TP: Use PDL if favorable, otherwise 1:3 RR minimum
                     pdl = features.levels.pdl if features.levels else 0
@@ -344,7 +344,7 @@ class ICTFVGScanner(Scanner):
                 # Calculate position size
                 contracts, actual_risk = self._calculate_position_size(current_price, stop_price)
                 if contracts == 0:
-                    return ScannerResult(scanner_id=self.scanner_id, triggered=False)
+                    return ScanResult(scanner_id=self.scanner_id, triggered=False)
                 
                 reward = abs(tp_price - current_price)
                 rr_ratio = reward / risk if risk > 0 else 0
@@ -358,7 +358,7 @@ class ICTFVGScanner(Scanner):
                 self._state.active_fvg = None
                 self._state.pending_direction = None
                 
-                return ScannerResult(
+                return ScanResult(
                     scanner_id=self.scanner_id,
                     triggered=True,
                     context={
@@ -386,4 +386,4 @@ class ICTFVGScanner(Scanner):
                     score=1.0
                 )
         
-        return ScannerResult(scanner_id=self.scanner_id, triggered=False)
+        return ScanResult(scanner_id=self.scanner_id, triggered=False)

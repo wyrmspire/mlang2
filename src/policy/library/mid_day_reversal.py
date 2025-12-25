@@ -3,7 +3,7 @@ Mid-Day Reversal Strategy
 Modular scanner that looks for reversals during lunch/mid-day.
 """
 
-from src.policy.scanners import Scanner, ScannerResult
+from src.policy.scanners import Scanner, ScanResult
 from src.features.state import MarketState
 from src.features.pipeline import FeatureBundle
 
@@ -35,19 +35,19 @@ class MidDayReversalScanner(Scanner):
         self,
         state: MarketState,
         features: FeatureBundle
-    ) -> ScannerResult:
+    ) -> ScanResult:
         t = features.time_features
         if not t or not t.is_rth:
-            return ScannerResult(scanner_id=self.scanner_id, triggered=False)
+            return ScanResult(scanner_id=self.scanner_id, triggered=False)
         
         # 1. Check time window
         is_midday = self.start_hour <= t.hour_ny <= self.end_hour
         if not is_midday:
-            return ScannerResult(scanner_id=self.scanner_id, triggered=False)
+            return ScanResult(scanner_id=self.scanner_id, triggered=False)
         
         # 2. Check for reversal signal (Simple RSI extreme for now)
         if features.indicators is None:
-            return ScannerResult(scanner_id=self.scanner_id, triggered=False)
+            return ScanResult(scanner_id=self.scanner_id, triggered=False)
         
         rsi = features.indicators.rsi_5m_14
         oversold = rsi <= self.rsi_extreme
@@ -55,7 +55,7 @@ class MidDayReversalScanner(Scanner):
         
         triggered = oversold or overbought
         
-        return ScannerResult(
+        return ScanResult(
             scanner_id=self.scanner_id,
             triggered=triggered,
             context={

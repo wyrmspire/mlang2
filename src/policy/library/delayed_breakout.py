@@ -10,7 +10,7 @@ from typing import Optional
 from dataclasses import dataclass
 from datetime import time
 
-from src.policy.scanners import Scanner, ScannerResult
+from src.policy.scanners import Scanner, ScanResult
 from src.features.state import MarketState
 from src.features.pipeline import FeatureBundle
 
@@ -159,30 +159,30 @@ class DelayedBreakoutScanner(Scanner):
         features: FeatureBundle,
         df_15m: pd.DataFrame = None,
         df_5m: pd.DataFrame = None
-    ) -> ScannerResult:
+    ) -> ScanResult:
         """Check for delayed breakout."""
         t = features.timestamp
         if t is None:
-            return ScannerResult(scanner_id=self.scanner_id, triggered=False)
+            return ScanResult(scanner_id=self.scanner_id, triggered=False)
         
         # 1. TIME FILTER
         current_t = t.time()
         if current_t < self.start_time or current_t > self.end_time:
-            return ScannerResult(scanner_id=self.scanner_id, triggered=False)
+            return ScanResult(scanner_id=self.scanner_id, triggered=False)
             
         # Cooldown check
         if features.bar_idx - self._state.last_trigger_bar < self.cooldown_bars:
-            return ScannerResult(scanner_id=self.scanner_id, triggered=False)
+            return ScanResult(scanner_id=self.scanner_id, triggered=False)
         
         # Need data
         if df_15m is None or df_15m.empty:
-            return ScannerResult(scanner_id=self.scanner_id, triggered=False)
+            return ScanResult(scanner_id=self.scanner_id, triggered=False)
         
         # Compute swings (for Entry)
         swing_high, swing_low = self._compute_swing_levels(df_15m, t)
         
         if swing_high == 0 or swing_low == 0:
-            return ScannerResult(scanner_id=self.scanner_id, triggered=False)
+            return ScanResult(scanner_id=self.scanner_id, triggered=False)
         
         current_price = features.current_price
         atr = features.atr if features.atr > 0 else 1.0
@@ -211,7 +211,7 @@ class DelayedBreakoutScanner(Scanner):
                     stop_price = swing_low - padding
                 
                 risk = current_price - stop_price
-                if risk <= 0: return ScannerResult(scanner_id=self.scanner_id, triggered=False)
+                if risk <= 0: return ScanResult(scanner_id=self.scanner_id, triggered=False)
                 tp_price = current_price + (1.4 * risk)
                 
             else: # SHORT
@@ -221,17 +221,17 @@ class DelayedBreakoutScanner(Scanner):
                     stop_price = swing_high + padding
                 
                 risk = stop_price - current_price
-                if risk <= 0: return ScannerResult(scanner_id=self.scanner_id, triggered=False)
+                if risk <= 0: return ScanResult(scanner_id=self.scanner_id, triggered=False)
                 tp_price = current_price - (1.4 * risk)
             
             # 3. Position Sizing
             contracts, actual_risk = self._calculate_position_size(current_price, stop_price)
             if contracts == 0:
-                 return ScannerResult(scanner_id=self.scanner_id, triggered=False)
+                 return ScanResult(scanner_id=self.scanner_id, triggered=False)
 
             self._state.last_trigger_bar = features.bar_idx
             
-            return ScannerResult(
+            return ScanResult(
                 scanner_id=self.scanner_id,
                 triggered=True,
                 context={
@@ -252,4 +252,4 @@ class DelayedBreakoutScanner(Scanner):
                 score=1.0
             )
             
-        return ScannerResult(scanner_id=self.scanner_id, triggered=False)
+        return ScanResult(scanner_id=self.scanner_id, triggered=False)

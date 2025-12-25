@@ -4,7 +4,7 @@ Triggers when price extends beyond Keltner Channels (EMA +/- ATR bands).
 """
 
 from typing import Dict, Any
-from src.policy.scanners import Scanner, ScannerResult
+from src.policy.scanners import Scanner, ScanResult
 from src.features.state import MarketState
 from src.features.pipeline import FeatureBundle
 
@@ -39,9 +39,9 @@ class MeanReversionScanner(Scanner):
         self,
         state: MarketState,
         features: FeatureBundle
-    ) -> ScannerResult:
+    ) -> ScanResult:
         if features.indicators is None:
-            return ScannerResult(scanner_id=self.scanner_id, triggered=False)
+            return ScanResult(scanner_id=self.scanner_id, triggered=False)
         
         ind = features.indicators
         
@@ -54,10 +54,10 @@ class MeanReversionScanner(Scanner):
             atr = ind.atr_15m_14
             rsi = ind.rsi_15m_14
         else:
-            return ScannerResult(scanner_id=self.scanner_id, triggered=False)
+            return ScanResult(scanner_id=self.scanner_id, triggered=False)
             
         if ema == 0 or atr == 0:
-            return ScannerResult(scanner_id=self.scanner_id, triggered=False)
+            return ScanResult(scanner_id=self.scanner_id, triggered=False)
             
         current_price = features.current_price
         
@@ -93,7 +93,7 @@ class MeanReversionScanner(Scanner):
             # Reset state when condition is lost
             self._was_triggered = False
             
-        return ScannerResult(
+        return ScanResult(
             scanner_id=self.scanner_id,
             triggered=triggered,
             context={
