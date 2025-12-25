@@ -1,0 +1,13 @@
+Validating run: results\viz\golden_test_1
+============================================================
+Traceback (most recent call last):
+  File "C:\mlang2\golden\validate_run.py", line 366, in <module>
+    main()
+    ~~~~^^
+  File "C:\mlang2\golden\validate_run.py", line 349, in main
+    print(f"\n\u274c {len(errors)} ERROR(S) found:\n")
+    ~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python313\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u274c' in position 2: character maps to <undefined>

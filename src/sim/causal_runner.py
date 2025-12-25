@@ -156,7 +156,7 @@ class CausalExecutor:
             
             # Run scan
             # Note: MarketState is passed as None for now, or extracted from features if available
-            scan_result = self.scanner.scan(None, features)
+            scan_result = self.scanner.scan(features.market_state, features)
             
             if scan_result.triggered:
                 # 3. Signals -> Orders

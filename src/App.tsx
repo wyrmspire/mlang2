@@ -269,7 +269,6 @@ const App: React.FC = () => {
             activeDecision={activeDecision}
             trade={activeTrade}
             trades={trades}
-            defaultShowAllTrades={true}
           />
 
           {/* Floating Info Overlay */}

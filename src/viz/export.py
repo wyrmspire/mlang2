@@ -327,6 +327,8 @@ class Exporter:
         strategy_name = self.experiment_config.get('trigger', {}).get('trigger_id', 'unknown')
         manifest = {
             'run_id': self.run_id,
+            'fingerprint': self._compute_fingerprint(),
+            'config': self.experiment_config,
             'created_at': now_utc.isoformat(),
             'strategy': strategy_name,
             'files': {

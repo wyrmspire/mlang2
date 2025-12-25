@@ -338,7 +338,7 @@ def main():
     issues = validate_run_structure(run_path)
     
     if not issues:
-        print("✅ No issues found! Run structure is valid.")
+        print("[OK] No issues found! Run structure is valid.")
         sys.exit(0)
     
     # Group by severity
@@ -346,12 +346,12 @@ def main():
     warnings = [i for i in issues if i.severity == 'WARNING']
     
     if errors:
-        print(f"\n❌ {len(errors)} ERROR(S) found:\n")
+        print(f"\n[ERROR] {len(errors)} ERROR(S) found:\n")
         for issue in errors:
             print(f"  {issue}")
     
     if warnings:
-        print(f"\n⚠️  {len(warnings)} WARNING(S) found:\n")
+        print(f"\n[WARN] {len(warnings)} WARNING(S) found:\n")
         for issue in warnings:
             print(f"  {issue}")
     
