@@ -238,6 +238,15 @@ def run_experiment(
         # And the bracket (order) if any
         bracket_ref = result.new_orders[0] if result.new_orders else None
         
+        # Get direction from scanner context (dynamic) or fall back to config (static)
+        # Note: trigger could be a ScanResult object or dict depending on CausalExecutor
+        if hasattr(trigger, 'context'):
+            scanner_context = trigger.context
+        else:
+            scanner_context = trigger.get('context', {}) if isinstance(trigger, dict) else {}
+        scanner_direction = scanner_context.get('direction') if scanner_context else None
+        effective_direction = scanner_direction or config.oco_config.direction
+        
         # Features are available in result
         features = result.features
         
@@ -343,11 +352,12 @@ def run_experiment(
             
             # Export Bracket if trade
             if record.action == Action.PLACE_ORDER:
-                # Create bracket to visualize TP/SL
+                # Create bracket to visualize TP/SL (use scanner direction)
                 bracket = create_oco_bracket(
                     config=config.oco_config,
                     base_price=features.current_price,
-                    atr=features.atr
+                    atr=features.atr,
+                    direction_override=effective_direction
                 )
                 sizing_result = calculate_contracts(
                     entry_price=bracket.entry_price,
@@ -373,7 +383,8 @@ def run_experiment(
                 bracket = create_oco_bracket(
                     config=config.oco_config,
                     base_price=features.current_price,
-                    atr=features.atr
+                    atr=features.atr,
+                    direction_override=effective_direction
                 )
                 sizing_result = calculate_contracts(
                     entry_price=bracket.entry_price,
@@ -381,7 +392,7 @@ def run_experiment(
                     max_risk_dollars=DEFAULT_MAX_RISK_DOLLARS
                 )
                 exit_price = features.current_price + (
-                    record.cf_pnl / (1 if config.oco_config.direction == "LONG" else -1)
+                    record.cf_pnl / (1 if effective_direction == "LONG" else -1)
                 )
                 pnl_points, pnl_dollars = calculate_pnl_dollars(
                     entry_price=features.current_price,
@@ -396,7 +407,7 @@ def run_experiment(
                     entry_time=features.timestamp,
                     entry_bar=result.bar_idx,
                     entry_price=features.current_price,
-                    direction=config.oco_config.direction,
+                    direction=effective_direction,
                     exit_time=exit_time,
                     exit_bar=exit_bar,
                     exit_price=exit_price,

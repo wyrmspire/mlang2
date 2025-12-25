@@ -183,6 +183,7 @@ class OCOEngine:
         current_idx: int = 0,
         range_high: float = 0.0,
         range_low: float = 0.0,
+        direction_override: Optional[str] = None,
     ) -> OCOBracket:
         """
         Create OCO bracket with computed price levels.
@@ -196,15 +197,18 @@ class OCOEngine:
             current_idx: Current bar index
             range_high: Pre-calculated range high (for range-based stops)
             range_low: Pre-calculated range low (for range-based stops)
+            direction_override: Override config.direction (for dynamic scanners)
             
         Returns:
             OCOBracket with rounded prices
         """
+        # Use override direction if provided, else use config
+        direction = direction_override or config.direction
         # Calculate entry price
         if config.entry_type == 'MARKET':
             entry_price = base_price
         else:  # LIMIT
-            if config.direction == 'LONG':
+            if direction == 'LONG':
                 entry_price = self.costs.round_to_tick(
                     base_price - config.entry_offset_atr * atr, 'down'
                 )
@@ -217,7 +221,7 @@ class OCOEngine:
         if config.stop_config is not None:
             # Use smart stop calculator
             stop_price, stop_reason = calculate_stop(
-                direction=config.direction,
+                direction=direction,
                 entry_price=entry_price,
                 atr=atr,
                 config=config.stop_config,
@@ -228,13 +232,13 @@ class OCOEngine:
                 range_low=range_low,
             )
             # Round to tick
-            if config.direction == 'LONG':
+            if direction == 'LONG':
                 stop_price = self.costs.round_to_tick(stop_price, 'down')
             else:
                 stop_price = self.costs.round_to_tick(stop_price, 'up')
         else:
             # Legacy ATR-based stop
-            if config.direction == 'LONG':
+            if direction == 'LONG':
                 stop_price = self.costs.round_to_tick(
                     entry_price - config.stop_atr * atr, 'down'
                 )
@@ -247,12 +251,12 @@ class OCOEngine:
         tp_price = calculate_tp_from_risk(
             entry_price=entry_price,
             stop_price=stop_price,
-            direction=config.direction,
+            direction=direction,
             r_multiple=config.tp_multiple
         )
         
         # Round TP to tick
-        if config.direction == 'LONG':
+        if direction == 'LONG':
             tp_price = self.costs.round_to_tick(tp_price, 'up')
         else:
             tp_price = self.costs.round_to_tick(tp_price, 'down')

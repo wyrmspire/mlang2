@@ -162,8 +162,8 @@ class CausalExecutor:
                 # 3. Signals -> Orders
                 # -----------------------------------------------
                 
-                # Determine direction
-                direction = getattr(scan_result, 'direction', "LONG")
+                # Determine direction from scanner context
+                direction = scan_result.context.get('direction', 'LONG') if scan_result.context else 'LONG'
                 
                 # Construct OCO Config
                 # TODO: This should come from a Strategy Config object
@@ -199,11 +199,12 @@ class CausalExecutor:
                 # Register
                 self.active_brackets.append(bracket)
                 
-                # Record event
+                # Record event - include full context for downstream use
                 result.scanner_triggers.append({
                     'scanner': self.scanner.__class__.__name__,
                     'price': features.current_price,
-                    'direction': direction
+                    'direction': direction,
+                    'context': scan_result.context or {}
                 })
                 result.new_orders.append(bracket)
 
