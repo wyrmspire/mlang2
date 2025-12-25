@@ -29,7 +29,7 @@ class TestOCOEngine(unittest.TestCase):
     def setUp(self):
         """Set up test fixtures."""
         self.engine = OCOEngine()
-        self.costs = CostModel(tick_size=0.25, contract_value=5.0)
+        self.costs = CostModel(tick_size=0.25, point_value=5.0)
         
         # Create sample bar data
         base_time = datetime(2025, 3, 18, 9, 30)
