@@ -60,6 +60,9 @@ class Exporter:
         # Temp storage for linking
         self._pending_ocos: Dict[str, VizOCO] = {}  # decision_id -> oco
         self._pending_fills: Dict[str, List[VizFill]] = {}  # decision_id -> fills
+        
+        # Window bounds tracking (for 2-hour policy enforcement)
+        self._window_warnings: List[str] = []
     
     def set_split(self, split_id: str, split_idx: int, train_start: str, train_end: str, test_start: str, test_end: str):
         """Start a new split."""
@@ -152,8 +155,15 @@ class Exporter:
         if self.splits:
             self.splits[-1].num_decisions += 1
     
-    def on_bracket_created(self, decision_id: str, bracket: OCOBracket):
-        """Record OCO bracket creation."""
+    def on_bracket_created(self, decision_id: str, bracket: OCOBracket, contracts: int = 1):
+        """
+        Record OCO bracket creation.
+        
+        Args:
+            decision_id: Decision ID to link to
+            bracket: OCO bracket configuration
+            contracts: Number of contracts (REQUIRED, must be calculated via sizing)
+        """
         # Use getattr for compatibility with both legacy oco.py and unified oco_engine.py
         # oco_engine.py doesn't have reference/reference_value fields
         reference_attr = getattr(bracket.config, 'reference', None)
@@ -166,6 +176,7 @@ class Exporter:
             tp_price=bracket.tp_price,
             entry_type=bracket.config.entry_type,
             direction=bracket.config.direction,
+            contracts=contracts,  # REQUIRED: Set from sizing calculation
             reference_type=reference_type,
             reference_value=reference_value,
             atr_at_creation=bracket.atr_at_creation,
@@ -205,12 +216,19 @@ class Exporter:
     
     def on_trade_closed(self, trade: TradeRecord):
         """Record a completed trade."""
+        # Get contracts from the matching decision's OCO
+        contracts = 1  # Default
+        for d in reversed(self.decisions):
+            if d.decision_id == trade.decision_id and d.oco:
+                contracts = d.oco.contracts
+                break
+        
         viz_trade = VizTrade(
             trade_id=trade.trade_id,
             decision_id=trade.decision_id,
             index=self._trade_idx,
             direction=trade.direction,
-            size=1,  # Fixed for now
+            size=contracts,  # Use contracts from OCO
             entry_time=trade.entry_time.isoformat() if trade.entry_time else None,
             entry_bar=trade.entry_bar,
             entry_price=trade.entry_price,
@@ -328,6 +346,15 @@ class Exporter:
             }
         }
         
+        # Add window bounds and warnings if available
+        if self._window_warnings:
+            manifest['window_warnings'] = self._window_warnings
+        
+        # Compute actual window bounds from decisions
+        window_bounds = self._compute_window_bounds()
+        if window_bounds:
+            manifest['window_bounds'] = window_bounds
+        
         if series_path:
             manifest['files']['full_series'] = 'full_series.json'
             manifest['checksums']['full_series'] = self._file_checksum(series_path)
@@ -339,8 +366,40 @@ class Exporter:
         print(f"Viz export complete: {out_dir}")
         print(f"  Decisions: {len(self.decisions)}")
         print(f"  Trades: {len(self.trades)}")
+        if self._window_warnings:
+            print(f"  Window warnings: {len(self._window_warnings)}")
+            for warning in self._window_warnings:
+                print(f"    - {warning}")
         
         return out_dir
+    
+    def _compute_window_bounds(self) -> Optional[Dict[str, Any]]:
+        """
+        Compute actual window bounds from decisions with windows.
+        
+        Returns dict with window_start, window_end, and policy compliance info.
+        """
+        decisions_with_windows = [d for d in self.decisions if d.window and d.window.raw_ohlcv_1m]
+        if not decisions_with_windows:
+            return None
+        
+        # Find min/max timestamps across all windows
+        all_times = []
+        for d in decisions_with_windows:
+            if d.window.raw_ohlcv_1m:
+                # Handle both dict and list formats
+                for bar in d.window.raw_ohlcv_1m:
+                    if isinstance(bar, dict) and 'time' in bar:
+                        all_times.append(bar['time'])
+        
+        if not all_times:
+            return None
+        
+        return {
+            'window_start': min(all_times),
+            'window_end': max(all_times),
+            'decisions_with_windows': len(decisions_with_windows),
+        }
     
     def _compute_fingerprint(self) -> str:
         """Compute a fingerprint for this run."""
