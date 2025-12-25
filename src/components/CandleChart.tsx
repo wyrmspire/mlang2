@@ -293,23 +293,33 @@ export const CandleChart: React.FC<CandleChartProps> = ({
             const oco = decision.oco;
             if (!oco?.entry_price || !oco?.stop_price || !oco?.tp_price) return;
 
-            // Snap start time to current timeframe interval
-            const rawStartIdx = findBarIndex(continuousData.bars, decision.timestamp);
-            const snappedStartIdx = Math.floor(rawStartIdx / interval);
-            const snappedStartBar = aggregatedBars[Math.min(snappedStartIdx, aggregatedBars.length - 1)];
-            if (!snappedStartBar) return;
-            const startTime = parseTime(snappedStartBar.time) as Time;
+            // ========================================
+            // FIX: Use decision's timestamp directly, not continuousData lookup
+            // This ensures alignment even when continuousData doesn't include premkt
+            // ========================================
+            const startTime = parseTime(decision.timestamp) as Time;
 
             // Calculate end time using bars_held from oco_results if available
-            const ocoResults = decision.oco_results || {};
-            const bestOco = Object.values(ocoResults)[0] as { bars_held?: number } | undefined;
-            const barsHeld = bestOco?.bars_held || 30; // Fallback to 30 mins if not available
+            // Support both flat format (ifvg_debug) and nested format (older scans)
+            const ocoResults = decision.oco_results as any || {};
+            let barsHeld = 30; // Fallback
 
-            // Convert bars_held (which is in 1m bars) to current timeframe bars
-            const barsInTimeframe = Math.max(1, Math.ceil(barsHeld / interval));
-            const endIdx = Math.min(snappedStartIdx + barsInTimeframe, aggregatedBars.length - 1);
-            const endBar = aggregatedBars[endIdx];
-            const endTime = endBar ? parseTime(endBar.time) as Time : startTime;
+            if (typeof ocoResults.bars_held === 'number') {
+                // Flat format (ifvg_debug, new scans)
+                barsHeld = ocoResults.bars_held;
+            } else if (typeof ocoResults === 'object') {
+                // Nested format - check first value
+                const firstVal = Object.values(ocoResults)[0];
+                if (firstVal && typeof firstVal === 'object' && 'bars_held' in (firstVal as object)) {
+                    barsHeld = (firstVal as { bars_held: number }).bars_held;
+                }
+            }
+
+            // Compute endTime by adding bars_held minutes to startTime
+            // bars_held is in 1-minute bars, so add that many minutes
+            const startDate = new Date(decision.timestamp);
+            const endDate = new Date(startDate.getTime() + barsHeld * 60 * 1000);
+            const endTime = parseTime(endDate.toISOString()) as Time;
 
             const direction = (decision.scanner_context?.direction || oco.direction || 'LONG') as 'LONG' | 'SHORT';
 

@@ -62,6 +62,7 @@ class VizOCO:
     tp_price: float = 0.0
     entry_type: str = "LIMIT"
     direction: str = "LONG"
+    contracts: int = 1  # Number of contracts for position sizing
     
     reference_type: str = "PRICE"
     reference_value: float = 0.0
@@ -79,6 +80,7 @@ class VizOCO:
             'tp_price': self.tp_price,
             'entry_type': self.entry_type,
             'direction': self.direction,
+            'contracts': self.contracts,
             'reference_type': self.reference_type,
             'reference_value': self.reference_value,
             'atr_at_creation': self.atr_at_creation,

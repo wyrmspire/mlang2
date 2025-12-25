@@ -283,10 +283,14 @@ def run_strategy_scan(
         # Compute bracket levels
         levels = bracket.compute(entry_price, direction, atr_value)
         
+        # Find entry_idx in df_1m using time-based lookup (same pattern as raw_ohlcv)
+        cf_mask = df_1m['time'] <= bar_time
+        cf_entry_idx = cf_mask.sum() - 1 if cf_mask.any() else 0
+        
         # Compute counterfactual outcome
         cf = compute_smart_stop_counterfactual(
             df=df_1m,
-            entry_idx=bar_idx * (5 if timeframe == '5m' else 15 if timeframe == '15m' else 1),
+            entry_idx=cf_entry_idx,
             direction=direction,
             stop_price=levels.stop_price,
             tp_multiple=levels.r_multiple,
@@ -294,15 +298,28 @@ def run_strategy_scan(
             oco_name="strategy"
         )
         
-        # Get raw OHLCV window for chart - MUST include timestamps for arrow alignment
-        start_raw_idx = max(0, bar_idx - lookback_bars)
-        end_raw_idx = min(len(df_scan), bar_idx + lookahead_bars + 1)
-        raw_slice = df_scan.iloc[start_raw_idx:end_raw_idx]
+        # Get raw OHLCV window for chart - MUST match ifvg_debug pattern:
+        # 1. Use df_1m (not df_scan)
+        # 2. Time-based lookup centered on entry_time
+        # 3. 60 bars history, 120 bars future on 1m data
+        history_bars_1m = 60
+        future_bars_1m = 120
+        
+        # Find entry index in df_1m by time
+        mask = df_1m['time'] <= bar_time
+        if not mask.any():
+            entry_idx_1m = 0
+        else:
+            entry_idx_1m = mask.sum() - 1
+        
+        start_raw_idx = max(0, entry_idx_1m - history_bars_1m)
+        end_raw_idx = min(len(df_1m), entry_idx_1m + future_bars_1m)
+        raw_slice = df_1m.iloc[start_raw_idx:end_raw_idx]
         
         # Format as objects with timestamps (like ifvg_debug) - UI requires this
         raw_ohlcv = [
             {
-                "time": str(row['time']),
+                "time": row['time'].isoformat() if hasattr(row['time'], 'isoformat') else str(row['time']),
                 "open": float(row['open']),
                 "high": float(row['high']),
                 "low": float(row['low']),
@@ -312,11 +329,11 @@ def run_strategy_scan(
             for _, row in raw_slice.iterrows()
         ]
         
-        # Future bars (also with timestamps)
-        future_slice = df_scan.iloc[bar_idx+1:bar_idx+lookahead_bars+1]
+        # Future bars from 1m data (for counterfactual viz)
+        future_slice = df_1m.iloc[entry_idx_1m+1:entry_idx_1m+future_bars_1m+1]
         future_bars = [
             {
-                "time": str(row['time']),
+                "time": row['time'].isoformat() if hasattr(row['time'], 'isoformat') else str(row['time']),
                 "open": float(row['open']),
                 "high": float(row['high']),
                 "low": float(row['low']),
@@ -408,7 +425,7 @@ def run_strategy_scan(
             exit_reason=cf.outcome,
             outcome=cf.outcome,
             pnl_points=cf.pnl_dollars / 50,  # Approx conversion
-            pnl_dollars=cf.pnl_dollars,
+            pnl_dollars=cf.pnl_dollars * contracts,  # Scale by contracts for $300 risk
             r_multiple=cf.pnl_dollars / (levels.risk_points * 50) if levels.risk_points > 0 else 0,
             bars_held=int(cf.bars_held),
             mae=0,  # Would need to compute

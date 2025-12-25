@@ -132,13 +132,14 @@ class Exporter:
             viz_decision.model_logits = model_logits
             viz_decision.model_probs = model_probs
         
-        # Add window data
-        if self.config.include_windows and features:
+        # Add window data - output even if features is sparse/dummy
+        # The key fields for UI are raw_ohlcv_1m and indicators
+        if self.config.include_windows and (raw_ohlcv or indicators):
             viz_decision.window = VizWindow(
-                x_price_1m=features.x_price_1m.tolist() if features.x_price_1m is not None else [],
-                x_price_5m=features.x_price_5m.tolist() if features.x_price_5m is not None else [],
-                x_price_15m=features.x_price_15m.tolist() if features.x_price_15m is not None else [],
-                x_context=features.x_context.tolist() if features.x_context is not None else [],
+                x_price_1m=features.x_price_1m.tolist() if features and features.x_price_1m is not None else [],
+                x_price_5m=features.x_price_5m.tolist() if features and features.x_price_5m is not None else [],
+                x_price_15m=features.x_price_15m.tolist() if features and features.x_price_15m is not None else [],
+                x_context=features.x_context.tolist() if features and features.x_context is not None else [],
                 raw_ohlcv_1m=raw_ohlcv or [],
                 future_price_1m=future_1m or [],
                 indicators=indicators or {}
@@ -229,16 +230,16 @@ class Exporter:
         
         # === CRITICAL: Update the matching decision with oco_results ===
         # This is required for position box duration in the UI
+        # Format MUST match ifvg_debug: flat dict, not nested
         for d in reversed(self.decisions):
             if d.decision_id == trade.decision_id:
                 d.oco_results = {
-                    "strategy": {
-                        "outcome": trade.outcome,
-                        "pnl_dollars": trade.pnl_dollars,
-                        "bars_held": trade.bars_held,
-                        "exit_price": trade.exit_price,
-                        "r_multiple": trade.r_multiple
-                    }
+                    "filled": True,
+                    "outcome": trade.outcome,
+                    "exit_price": trade.exit_price,
+                    "bars_held": trade.bars_held,
+                    "pnl_points": trade.pnl_points,
+                    "pnl_dollars": trade.pnl_dollars
                 }
                 break
         
