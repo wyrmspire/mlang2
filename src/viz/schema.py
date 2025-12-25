@@ -144,6 +144,9 @@ class VizDecision:
     # OCO (if PLACE_ORDER)
     oco: Optional[VizOCO] = None
     
+    # OCO results for position box duration - UI reads bars_held from here
+    oco_results: Optional[Dict[str, Dict[str, Any]]] = None
+    
     def to_dict(self) -> Dict[str, Any]:
         return {
             'decision_id': self.decision_id,
@@ -162,6 +165,7 @@ class VizDecision:
             'model_probs': self.model_probs,
             'window': self.window.to_dict() if self.window else None,
             'oco': self.oco.to_dict() if self.oco else None,
+            'oco_results': self.oco_results,
         }
 
 

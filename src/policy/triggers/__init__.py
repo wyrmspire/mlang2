@@ -9,6 +9,11 @@ from .time_trigger import TimeTrigger
 from .candle_patterns import CandlePatternTrigger, CandlePattern
 from .indicator_triggers import EMACrossTrigger, RSIThresholdTrigger
 from .structure_break import StructureBreakTrigger
+from .fakeout import FakeoutTrigger
+from .ema_rejection import EMA200RejectionTrigger
+from .parametric import RejectionTrigger, ComparisonTrigger
+from .sweep import SweepTrigger
+from .or_false_break import ORFalseBreakTrigger
 
 # Registry of all available triggers
 TRIGGER_REGISTRY = {
@@ -17,6 +22,13 @@ TRIGGER_REGISTRY = {
     "ema_cross": EMACrossTrigger,
     "rsi_threshold": RSIThresholdTrigger,
     "structure_break": StructureBreakTrigger,
+    "fakeout": FakeoutTrigger,
+    "ema200_rejection": EMA200RejectionTrigger,
+    # Parametric triggers - the preferred way
+    "rejection": RejectionTrigger,
+    "comparison": ComparisonTrigger,
+    "sweep": SweepTrigger,
+    "or_false_break": ORFalseBreakTrigger,
 }
 
 

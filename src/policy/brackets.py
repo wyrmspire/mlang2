@@ -294,12 +294,82 @@ class ICTBracket(Bracket):
         )
 
 
+class RangeBracket(Bracket):
+    """
+    Bracket where SL is based on a context range size and TP is R-multiple.
+    
+    Perfect for OR strategies: SL = range size, TP = range * tp_multiple
+    
+    Agent config:
+        {"type": "range", "tp_multiple": 2.0}
+    
+    Requires `range_size` to be passed in kwargs during compute().
+    For OR False Break: range_size = OR high - OR low
+    """
+    
+    def __init__(self, tp_multiple: float = 2.0, sl_buffer: float = 0.5):
+        self._tp_multiple = tp_multiple
+        self._sl_buffer = sl_buffer  # Extra points beyond range for SL
+    
+    @property
+    def bracket_type(self) -> BracketType:
+        return BracketType.LEVEL
+    
+    @property
+    def params(self) -> Dict[str, Any]:
+        return {
+            "tp_multiple": self._tp_multiple,
+            "sl_buffer": self._sl_buffer,
+        }
+    
+    def compute(
+        self,
+        entry_price: float,
+        direction: str,
+        atr: float,
+        range_size: float = None,  # Provided from trigger context
+        target_level: float = None,  # Optional specific target (e.g., OR_low)
+        **kwargs
+    ) -> BracketLevels:
+        """
+        Compute range-based bracket levels.
+        
+        For LONG: SL = entry - range_size - buffer, TP = target_level or entry + range * tp_multiple
+        For SHORT: SL = entry + range_size + buffer, TP = target_level or entry - range * tp_multiple
+        """
+        if range_size is None:
+            range_size = atr * 2  # Fallback to ATR-based
+        
+        risk_points = range_size + self._sl_buffer
+        
+        if target_level is not None:
+            reward_points = abs(target_level - entry_price)
+        else:
+            reward_points = range_size * self._tp_multiple
+        
+        if direction.upper() == "LONG":
+            stop_price = entry_price - risk_points
+            tp_price = target_level if target_level else entry_price + reward_points
+        else:
+            stop_price = entry_price + risk_points
+            tp_price = target_level if target_level else entry_price - reward_points
+        
+        return BracketLevels(
+            stop_price=stop_price,
+            tp_price=tp_price,
+            risk_points=risk_points,
+            reward_points=reward_points,
+            r_multiple=reward_points / risk_points if risk_points > 0 else 0
+        )
+
+
 # Registry and factory
 BRACKET_REGISTRY = {
     "atr": ATRBracket,
     "percent": PercentBracket,
     "fixed": FixedBracket,
     "ict": ICTBracket,
+    "range": RangeBracket,
 }
 
 
@@ -322,3 +392,4 @@ def bracket_from_dict(config: dict) -> Bracket:
 def list_brackets() -> list:
     """List available bracket types."""
     return list(BRACKET_REGISTRY.keys())
+

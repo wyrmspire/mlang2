@@ -227,6 +227,21 @@ class Exporter:
         self.trades.append(viz_trade)
         self._trade_idx += 1
         
+        # === CRITICAL: Update the matching decision with oco_results ===
+        # This is required for position box duration in the UI
+        for d in reversed(self.decisions):
+            if d.decision_id == trade.decision_id:
+                d.oco_results = {
+                    "strategy": {
+                        "outcome": trade.outcome,
+                        "pnl_dollars": trade.pnl_dollars,
+                        "bars_held": trade.bars_held,
+                        "exit_price": trade.exit_price,
+                        "r_multiple": trade.r_multiple
+                    }
+                }
+                break
+        
         # Update split stats
         if self.splits:
             self.splits[-1].num_trades += 1
