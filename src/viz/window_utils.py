@@ -48,7 +48,7 @@ def enforce_2hour_window(
     
     # Filter data
     if 'time' not in df_1m.columns:
-        return [], "DataFrame missing 'time' column"
+        return [], "DataFrame missing 'time' column. Expected DataFrame with columns: time, open, high, low, close, volume"
     
     mask = (df_1m['time'] >= window_start) & (df_1m['time'] <= window_end)
     window_df = df_1m.loc[mask]

@@ -40,7 +40,7 @@ from src.policy.actions import Action, SkipReason
 from src.datasets.decision_record import DecisionRecord
 from src.datasets.trade_record import TradeRecord
 from src.sim.oco_engine import OCOBracket, OCOConfig, OCOEngine, DEFAULT_OCO_ENGINE
-from src.sim.sizing import calculate_contracts, calculate_pnl_dollars, DEFAULT_MAX_RISK_DOLLARS
+from src.sim.sizing import calculate_contracts, calculate_pnl_dollars, calculate_reward_dollars, DEFAULT_MAX_RISK_DOLLARS
 
 from src.viz.export import Exporter
 from src.viz.config import VizConfig
@@ -356,7 +356,6 @@ def run_strategy_scan(
         risk_dollars = sizing_result.risk_dollars
         
         # Calculate reward using same cost model
-        from src.sim.sizing import calculate_reward_dollars
         reward_dollars = calculate_reward_dollars(
             entry_price=entry_price,
             tp_price=levels.tp_price,

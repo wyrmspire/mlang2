@@ -42,7 +42,7 @@ def calculate_contracts(
     entry_price: float,
     stop_price: float,
     max_risk_dollars: float = DEFAULT_MAX_RISK_DOLLARS,
-    cost_model: CostModel = None
+    cost_model: CostModel = DEFAULT_COSTS
 ) -> SizingResult:
     """
     Calculate number of contracts based on risk parameters.
@@ -70,9 +70,6 @@ def calculate_contracts(
         >>> result.risk_dollars
         300.0
     """
-    if cost_model is None:
-        cost_model = DEFAULT_COSTS
-    
     # Calculate risk in points
     risk_points = abs(entry_price - stop_price)
     
@@ -111,7 +108,7 @@ def calculate_reward_dollars(
     tp_price: float,
     direction: str,
     contracts: int,
-    cost_model: CostModel = None
+    cost_model: CostModel = DEFAULT_COSTS
 ) -> float:
     """
     Calculate potential reward in dollars.
@@ -126,9 +123,6 @@ def calculate_reward_dollars(
     Returns:
         Reward in dollars (always positive)
     """
-    if cost_model is None:
-        cost_model = DEFAULT_COSTS
-    
     if direction == "LONG":
         reward_points = tp_price - entry_price
     else:
@@ -143,7 +137,7 @@ def calculate_pnl_dollars(
     exit_price: float,
     direction: str,
     contracts: int,
-    cost_model: CostModel = None,
+    cost_model: CostModel = DEFAULT_COSTS,
     include_commission: bool = True
 ) -> Tuple[float, float]:
     """
@@ -163,9 +157,6 @@ def calculate_pnl_dollars(
     Returns:
         Tuple of (pnl_points, pnl_dollars)
     """
-    if cost_model is None:
-        cost_model = DEFAULT_COSTS
-    
     # Calculate points
     if direction == "LONG":
         pnl_points = exit_price - entry_price
