@@ -794,7 +794,6 @@ export const LiveSessionView: React.FC<LiveSessionViewProps> = ({
                             trade={null}
                             trades={completedTrades}
                             simulationOco={ocoState}
-                            forceShowAllTrades={true}
                         />
                     </div>
                 </div>

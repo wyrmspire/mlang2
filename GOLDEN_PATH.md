@@ -21,7 +21,8 @@ This defines how the system is **used and experienced**.
 
 3. **Replay / Simulation**
 
-   * Replay is for **hands-on stepping only**.
+   * **Replay/Simulation is for stepping/experience only.**
+   * **Backtest pipeline is the only thing allowed to mint viz artifacts.**
    * Prefer **Simulation (JSON-backed)** for reproducibility.
    * User configures **model + scanner + OCO**, then presses Play.
    * Replay must never recompute history or introduce lookahead.
@@ -44,7 +45,7 @@ Implementation details are irrelevant as long as this contract is met.
 
 ### 2) Required Artifacts (Non-Negotiable)
 
-Every run **must** produce:
+All viz runs **must** include:
 
 * `manifest.json`
 * `decisions.jsonl`
@@ -67,7 +68,8 @@ All engineering changes must follow this loop:
 1. Run a strategy to produce artifacts
 2. Validate with:
    `python golden/validate_run.py results/viz/<run>`
-3. Fix violations and re-run until clean
+3. **All changes must keep the validator passing.**
+4. Fix violations and re-run until clean
 
 No exceptions.
 
