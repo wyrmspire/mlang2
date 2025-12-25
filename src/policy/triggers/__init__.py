@@ -14,6 +14,7 @@ from .ema_rejection import EMA200RejectionTrigger
 from .parametric import RejectionTrigger, ComparisonTrigger
 from .sweep import SweepTrigger
 from .or_false_break import ORFalseBreakTrigger
+from .vwap_reclaim import VWAPReclaimTrigger
 
 # Registry of all available triggers
 TRIGGER_REGISTRY = {
@@ -29,6 +30,7 @@ TRIGGER_REGISTRY = {
     "comparison": ComparisonTrigger,
     "sweep": SweepTrigger,
     "or_false_break": ORFalseBreakTrigger,
+    "vwap_reclaim": VWAPReclaimTrigger,
 }
 
 

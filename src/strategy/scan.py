@@ -179,6 +179,12 @@ def run_strategy_scan(
     print("\n[1/5] Loading data...")
     df_1m = load_continuous_contract()
     df_1m = df_1m[(df_1m['time'] >= str(start)) & (df_1m['time'] < str(end))].reset_index(drop=True)
+    
+    # Compute VWAP for triggers that need it
+    from src.features.indicators import calculate_vwap
+    if 'vwap_session' not in df_1m.columns:
+        df_1m['vwap_session'] = calculate_vwap(df_1m, period='session')
+    
     print(f"  Loaded {len(df_1m)} 1m bars")
     
     # 2. Resample
@@ -225,7 +231,14 @@ def run_strategy_scan(
     
     for bar_idx in range(lookback_bars, len(df_scan) - lookahead_bars):
         bar = df_scan.iloc[bar_idx]
-        bar_time = pd.Timestamp(bar['time'])
+        bar_start_time = pd.Timestamp(bar['time'])
+        
+        # CRITICAL FIX: For market-on-close entry, timestamp should be bar CLOSE time
+        # not bar START time. This aligns timestamp with entry_price.
+        # For 5m bar: start=09:30, close=09:34 (we enter at 09:34)
+        timeframe_minutes = {'1m': 1, '5m': 5, '15m': 15}[timeframe]
+        bar_time = bar_start_time + pd.Timedelta(minutes=timeframe_minutes - 1)
+        
         atr_value = bar.get('atr', avg_atr)
         if pd.isna(atr_value):
             atr_value = avg_atr
@@ -301,8 +314,8 @@ def run_strategy_scan(
         # Get raw OHLCV window for chart - MUST match ifvg_debug pattern:
         # 1. Use df_1m (not df_scan)
         # 2. Time-based lookup centered on entry_time
-        # 3. 60 bars history, 120 bars future on 1m data
-        history_bars_1m = 60
+        # 3. 120 bars history (2 hrs for context), 120 bars future on 1m data
+        history_bars_1m = 120  # 2 hours of context before trade
         future_bars_1m = 120
         
         # Find entry index in df_1m by time
