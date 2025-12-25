@@ -27,6 +27,11 @@ echo "Generating diff: local $BRANCH vs $REMOTE_BRANCH..."
 {
     echo "# Git Diff Report"
     echo ""
+    echo "> [!WARNING]"
+    echo "> **PENDING REMOTE CHANGES DETECTED**"
+    echo "> This report shows changes that exist on the remote branch ($REMOTE_BRANCH) but have NOT yet been pulled locally."
+    echo "> DO NOT confuse these with your local work. These are the updates you will receive after running \`git pull\`."
+    echo ""
     echo "**Generated**: $(date)"
     echo ""
     echo "**Local Branch**: $BRANCH"
@@ -97,7 +102,8 @@ echo "Generating diff: local $BRANCH vs $REMOTE_BRANCH..."
     echo '```'
     echo ""
     
-    echo "## Commits Behind (remote changes not pulled)"
+    echo "## Commits Behind (REMOTE UPDATES PENDING)"
+    echo "These commits exist on origin but are NOT in your local branch yet."
     echo ""
     echo '```'
     git log --oneline "HEAD..$REMOTE_BRANCH" 2>/dev/null || echo "(none)"
@@ -106,22 +112,25 @@ echo "Generating diff: local $BRANCH vs $REMOTE_BRANCH..."
     
     echo "---"
     echo ""
-    echo "## File Changes (YOUR UNPUSHED CHANGES)"
+    echo "## File Changes (UPDATES YOU WILL RECEIVE)"
+    echo "This shows what will change in your local files after you pull."
     echo ""
     echo '```'
-    git diff --stat "$REMOTE_BRANCH" HEAD 2>/dev/null || echo "(no changes)"
+    # Show diff from local perspective to remote
+    git diff --stat HEAD "$REMOTE_BRANCH" 2>/dev/null || echo "(no changes)"
     echo '```'
     echo ""
     
     echo "---"
     echo ""
-    echo "## Full Diff of Your Unpushed Changes"
+    echo "## Full Diff of Pending Remote Updates"
     echo ""
-    echo "Green (+) = lines you ADDED locally"
-    echo "Red (-) = lines you REMOVED locally"
+    echo "Green (+) = lines that will be ADDED to your local files"
+    echo "Red (-) = lines that will be REMOVED from your local files"
     echo ""
     echo '```diff'
-    git diff "$REMOTE_BRANCH" HEAD 2>/dev/null || echo "(no diff)"
+    # Show diff from local perspective to remote
+    git diff HEAD "$REMOTE_BRANCH" 2>/dev/null || echo "(no diff)"
     echo '```'
     
 } > "$OUTPUT"
