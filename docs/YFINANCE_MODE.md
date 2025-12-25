@@ -174,10 +174,10 @@ class YFinanceStepper:
 
 ### Live Mode Script
 
-Located in `scripts/run_live_mode.py`:
+Located in `scripts/session_live.py`:
 
 ```bash
-python scripts/run_live_mode.py \
+python scripts/session_live.py \
   --ticker MES=F \
   --strategy ifvg_4class \
   --days 7 \

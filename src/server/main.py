@@ -561,7 +561,7 @@ async def lab_agent(request: LabChatRequest):
         # Run the EMA scan
         try:
             proc = subprocess.run(
-                ["python", "scripts/run_ema_scan.py", "--strategy", strategy, "--days", "7"],
+                ["python", "scripts/backtest_ema.py", "--strategy", strategy, "--days", "7"],
                 capture_output=True, text=True, timeout=120, cwd=str(RESULTS_DIR.parent)
             )
             
@@ -600,7 +600,7 @@ async def lab_agent(request: LabChatRequest):
     elif "orb" in last_message or "opening range" in last_message:
         try:
             proc = subprocess.run(
-                ["python", "scripts/run_orb_gridsearch.py", "--days", "7"],
+                ["python", "scripts/optimize_orb_gridsearch.py", "--days", "7"],
                 capture_output=True, text=True, timeout=180, cwd=str(RESULTS_DIR.parent)
             )
             output = proc.stdout
@@ -614,7 +614,7 @@ async def lab_agent(request: LabChatRequest):
     elif "lunch" in last_message and "fade" in last_message:
         try:
             proc = subprocess.run(
-                ["python", "scripts/run_lunch_fade.py", "--days", "7", "--save"],
+                ["python", "scripts/backtest_lunch_fade.py", "--days", "7", "--save"],
                 capture_output=True, text=True, timeout=120, cwd=str(RESULTS_DIR.parent)
             )
             output = proc.stdout
@@ -630,7 +630,7 @@ async def lab_agent(request: LabChatRequest):
     elif "combined" in last_message or ("orb" in last_message and "reversion" in last_message):
         try:
             proc = subprocess.run(
-                ["python", "scripts/run_combined_strategy.py", "--days", "7"],
+                ["python", "scripts/backtest_combined_strategy.py", "--days", "7"],
                 capture_output=True, text=True, timeout=120, cwd=str(RESULTS_DIR.parent)
             )
             output = proc.stdout
@@ -758,10 +758,10 @@ async def run_strategy(request: RunStrategyRequest) -> Dict[str, Any]:
     
     # Map strategy to script
     scripts = {
-        "opening_range": "scripts/run_or_multi_oco.py",
-        "or": "scripts/run_or_multi_oco.py",
-        "always": "scripts/run_or_multi_oco.py",
-        "modular": "scripts/run_modular_strategy.py",
+        "opening_range": "scripts/backtest_or_multi_oco.py",
+        "or": "scripts/backtest_or_multi_oco.py",
+        "always": "scripts/backtest_or_multi_oco.py",
+        "modular": "scripts/backtest_modular_strategy.py",
     }
     
     script = scripts.get(strategy_id)

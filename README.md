@@ -69,7 +69,7 @@ See [REPLAY_MODE.md](docs/REPLAY_MODE.md) for detailed usage guide.
 
 For strategy testing, use dates within this range. Example:
 ```bash
-python scripts/run_ict_fvg.py --start-date 2025-03-18 --weeks 4
+python scripts/backtest_ict_fvg.py --start-date 2025-03-18 --weeks 4
 ```
 
 ## Quick Start Guide

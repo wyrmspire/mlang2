@@ -83,7 +83,7 @@ def test_full_agent_cycle():
         print(f"      Records: {record_count}")
     else:
         print("      No scan data found. Skipping train step.")
-        print("      (Run a scan first: python scripts/run_or_multi_oco.py)")
+        print("      (Run a scan first: python scripts/backtest_or_multi_oco.py)")
         return {"success": False, "reason": "No scan data available"}
     
     # =========================================================================

@@ -296,7 +296,7 @@ MLang2 is a unified trading research platform with comprehensive backtesting, re
 ### Model Training Pipeline
 ```bash
 # 1. Generate labeled data
-python scripts/run_ict_fvg.py --start-date 2025-03-18 --weeks 8 --save
+python scripts/backtest_ict_fvg.py --start-date 2025-03-18 --weeks 8 --save
 
 # 2. Train model
 python scripts/train_ifvg_4class.py --records results/run_xyz/records.jsonl

@@ -10,7 +10,7 @@ Compare:
 - Adaptive Model: Retrained daily on rolling 2-week window
 
 Usage:
-    python scripts/run_walkforward_daily.py --days 7
+    python scripts/backtest_walkforward_daily.py --days 7
 """
 
 import sys

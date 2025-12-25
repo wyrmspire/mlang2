@@ -11,7 +11,7 @@ Optimizes for: PROFIT FACTOR (not just Net PnL)
 Profit Factor = Gross Wins / Gross Losses
 
 Run:
-    python scripts/run_orb_gridsearch.py
+    python scripts/optimize_orb_gridsearch.py
 """
 
 import sys

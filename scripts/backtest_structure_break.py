@@ -6,7 +6,7 @@ Uses the modular StructureBreakTrigger on 15m timeframe.
 Captures 20 5m candles for training data.
 
 Usage:
-    python scripts/run_structure_break.py --weeks 6 --out results/structure_break_scan
+    python scripts/backtest_structure_break.py --weeks 6 --out results/structure_break_scan
 """
 
 import sys

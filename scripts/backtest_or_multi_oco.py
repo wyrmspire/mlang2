@@ -4,7 +4,7 @@ Opening Range Multi-OCO Simulation with SMART STOPS
 Uses actual OR levels as stops, not simple ATR offsets.
 
 Usage:
-    python scripts/run_or_multi_oco.py --start-date 2025-03-17 --weeks 3 --out results/or_multi_oco/
+    python scripts/backtest_or_multi_oco.py --start-date 2025-03-17 --weeks 3 --out results/or_multi_oco/
 """
 
 import sys

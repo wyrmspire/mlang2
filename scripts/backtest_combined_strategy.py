@@ -9,7 +9,7 @@ Run multiple strategies in different time windows:
 Single account balance, combined equity curve.
 
 Usage:
-    python scripts/run_combined_strategy.py --days 7
+    python scripts/backtest_combined_strategy.py --days 7
 """
 
 import sys
