@@ -22,11 +22,13 @@ from src.data.resample import resample_all_timeframes
 
 from src.sim.stepper import MarketStepper
 from src.sim.oco_engine import create_oco_bracket
+from src.sim.sizing import calculate_contracts, calculate_pnl_dollars
 from src.features.pipeline import compute_features, precompute_indicators
 from src.policy.scanners import get_scanner
 from src.policy.filters import DEFAULT_FILTERS
 from src.policy.cooldown import CooldownManager
 from src.policy.actions import Action, SkipReason
+from src.viz.window_utils import enforce_2hour_window
 
 from src.labels.labeler import Labeler
 from src.datasets.decision_record import DecisionRecord
@@ -37,7 +39,7 @@ from src.datasets.reader import create_dataloader
 from src.models.fusion import FusionModel
 from src.models.train import train_model, TrainResult
 
-from src.config import PROCESSED_DIR, SHARDS_DIR, RESULTS_DIR
+from src.config import PROCESSED_DIR, SHARDS_DIR, RESULTS_DIR, DEFAULT_MAX_RISK_DOLLARS
 
 
 @dataclass
@@ -188,11 +190,19 @@ def run_experiment(
         if exporter:
             curr_idx = step.bar_idx
             
-            # Extract RAW OHLCV for chart: 60 bars before + 20 bars after
-            start_raw_idx = max(0, curr_idx - 60)
-            end_raw_idx = min(len(df), curr_idx + 21)  # +1 for current bar, +20 future
-            raw_slice = df.iloc[start_raw_idx : end_raw_idx]
-            raw_ohlcv = raw_slice[['open', 'high', 'low', 'close', 'volume']].values.tolist()
+            exit_time = None
+            if record.action == Action.PLACE_ORDER:
+                exit_time = features.timestamp + pd.Timedelta(minutes=record.cf_bars_held)
+
+            raw_ohlcv, window_warning = enforce_2hour_window(
+                df_1m=df,
+                entry_time=features.timestamp,
+                exit_time=exit_time,
+                bars_held=record.cf_bars_held
+            )
+
+            if window_warning:
+                exporter._window_warnings.append(window_warning)
             
             # Extract future bars separately (for compatibility)
             future_bars = []
@@ -226,7 +236,16 @@ def run_experiment(
                     base_price=features.current_price,
                     atr=features.atr
                 )
-                exporter.on_bracket_created(record.decision_id, bracket)
+                sizing_result = calculate_contracts(
+                    entry_price=bracket.entry_price,
+                    stop_price=bracket.stop_price,
+                    max_risk_dollars=DEFAULT_MAX_RISK_DOLLARS
+                )
+                exporter.on_bracket_created(
+                    record.decision_id,
+                    bracket,
+                    contracts=sizing_result.contracts
+                )
         
         # Update cooldown if trade placed
         if record.action == Action.PLACE_ORDER:
@@ -238,6 +257,26 @@ def run_experiment(
                 exit_bar = step.bar_idx + record.cf_bars_held
                 exit_time = features.timestamp + pd.Timedelta(minutes=record.cf_bars_held)
                 
+                bracket = create_oco_bracket(
+                    config=config.oco_config,
+                    base_price=features.current_price,
+                    atr=features.atr
+                )
+                sizing_result = calculate_contracts(
+                    entry_price=bracket.entry_price,
+                    stop_price=bracket.stop_price,
+                    max_risk_dollars=DEFAULT_MAX_RISK_DOLLARS
+                )
+                exit_price = features.current_price + (
+                    record.cf_pnl / (1 if config.oco_config.direction == "LONG" else -1)
+                )
+                pnl_points, pnl_dollars = calculate_pnl_dollars(
+                    entry_price=features.current_price,
+                    exit_price=exit_price,
+                    direction=config.oco_config.direction,
+                    contracts=sizing_result.contracts
+                )
+
                 trade = TradeRecord(
                     trade_id=str(uuid.uuid4())[:8],
                     decision_id=record.decision_id,
@@ -247,12 +286,12 @@ def run_experiment(
                     direction=config.oco_config.direction,
                     exit_time=exit_time,
                     exit_bar=exit_bar,
-                    exit_price=features.current_price + (record.cf_pnl / (1 if config.oco_config.direction=="LONG" else -1)),
+                    exit_price=exit_price,
                     exit_reason=record.cf_outcome,
                     outcome=record.cf_outcome,
-                    pnl_points=record.cf_pnl,
-                    pnl_dollars=record.cf_pnl_dollars,
-                    r_multiple=record.cf_pnl_dollars / (features.atr * config.oco_config.stop_atr * 50) if features.atr > 0 else 0,
+                    pnl_points=pnl_points,
+                    pnl_dollars=pnl_dollars,
+                    r_multiple=pnl_dollars / (features.atr * config.oco_config.stop_atr * 50) if features.atr > 0 else 0,
                     bars_held=record.cf_bars_held,
                     mae=record.cf_mae,
                     mfe=record.cf_mfe,
