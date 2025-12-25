@@ -21,6 +21,9 @@ from src.data.loader import load_continuous_contract
 from src.data.resample import resample_all_timeframes
 from src.core.tool_registry import ToolRegistry, ToolCategory
 
+# Import agent tools to register them
+import src.tools.agent_tools  # noqa: F401
+
 
 app = FastAPI(title="MLang2 API", version="1.0.0")
 
@@ -532,123 +535,24 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 GEMINI_MODEL = "gemini-2.0-flash-exp"
 
 # =============================================================================
-# TODO: Replace hardcoded AGENT_TOOLS with dynamic catalog from ToolRegistry
+# Dynamic Tool Catalog (Phase 9 Complete)
 # 
-# Next steps for Phase 9 completion:
-# 1. Use ToolRegistry.get_gemini_function_declarations() instead of AGENT_TOOLS
-# 2. Filter by appropriate categories for agent vs lab contexts
-# 3. Remove these hardcoded definitions
-# 
-# For now, keeping for backward compatibility while migration is in progress.
+# Tools are now generated dynamically from ToolRegistry.
+# Categories determine which tools are available in which contexts:
+# - AGENT_TOOLS: STRATEGY + UTILITY (for main agent)
+# - LAB_TOOLS: All categories (for lab agent)
 # =============================================================================
 
-# Tool definitions for Gemini Function Calling
-AGENT_TOOLS = [
-    {
-        "name": "run_strategy",
-        "description": "Run a modular strategy scan on historical data. Creates a new run that appears in the run list for visualization.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "strategy": {
-                    "type": "string",
-                    "enum": ["modular", "opening_range"],
-                    "description": "Strategy type. Use 'modular' for custom trigger/bracket configs."
-                },
-                "start_date": {
-                    "type": "string",
-                    "description": "Start date in YYYY-MM-DD format. Data available: 2025-03-18 to 2025-09-17."
-                },
-                "weeks": {
-                    "type": "integer",
-                    "description": "Number of weeks to scan.",
-                    "minimum": 1,
-                    "maximum": 26
-                },
-                "run_name": {
-                    "type": "string",
-                    "description": "Optional custom name for the run."
-                },
-                "trigger_type": {
-                    "type": "string",
-                    "enum": ["ema_cross", "ema_bounce", "rsi_threshold", "ifvg", "orb", "candle_pattern", "time"],
-                    "description": "Type of entry trigger."
-                },
-                "trigger_params": {
-                    "type": "object",
-                    "description": "Parameters for the trigger (e.g., {fast: 9, slow: 21} for ema_cross)."
-                },
-                "bracket_type": {
-                    "type": "string",
-                    "enum": ["atr", "percent", "fixed"],
-                    "description": "Type of stop/take-profit bracket."
-                },
-                "stop_atr": {
-                    "type": "number",
-                    "description": "Stop loss in ATR multiples (for atr bracket).",
-                    "default": 2.0
-                },
-                "tp_atr": {
-                    "type": "number",
-                    "description": "Take profit in ATR multiples (for atr bracket).",
-                    "default": 3.0
-                }
-            },
-            "required": ["strategy", "start_date", "weeks", "trigger_type", "bracket_type"]
-        }
-    },
-    {
-        "name": "set_index",
-        "description": "Navigate to a specific decision or trade by index number.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "index": {
-                    "type": "integer",
-                    "description": "The index to navigate to."
-                }
-            },
-            "required": ["index"]
-        }
-    },
-    {
-        "name": "set_mode",
-        "description": "Switch between viewing decisions or trades.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "mode": {
-                    "type": "string",
-                    "enum": ["DECISION", "TRADE"],
-                    "description": "The view mode to switch to."
-                }
-            },
-            "required": ["mode"]
-        }
-    },
-    {
-        "name": "load_run",
-        "description": "Load an existing run for visualization.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "run_id": {
-                    "type": "string",
-                    "description": "The run ID to load."
-                }
-            },
-            "required": ["run_id"]
-        }
-    },
-    {
-        "name": "list_runs",
-        "description": "List all available runs that can be loaded.",
-        "parameters": {
-            "type": "object",
-            "properties": {}
-        }
-    }
-]
+def get_agent_tools() -> List[Dict[str, Any]]:
+    """Get tools for main agent (strategy + utility)."""
+    return ToolRegistry.get_gemini_function_declarations(
+        categories=[ToolCategory.STRATEGY, ToolCategory.UTILITY]
+    )
+
+
+def get_lab_tools() -> List[Dict[str, Any]]:
+    """Get tools for lab agent (all categories)."""
+    return ToolRegistry.get_gemini_function_declarations()
 
 
 def build_agent_system_prompt(context: ChatContext, decisions: List[Dict], trades: List[Dict]) -> str:
@@ -730,10 +634,10 @@ async def agent_chat(request: ChatRequest) -> AgentResponse:
         role = "user" if msg.role == "user" else "model"
         gemini_contents.append({"role": role, "parts": [{"text": msg.content}]})
     
-    # Build request with function calling
+    # Build request with function calling (using dynamic tool catalog)
     gemini_request = {
         "contents": gemini_contents,
-        "tools": [{"function_declarations": AGENT_TOOLS}],
+        "tools": [{"function_declarations": get_agent_tools()}],
         "tool_config": {"function_calling_config": {"mode": "AUTO"}}
     }
     
@@ -836,74 +740,7 @@ async def agent_chat(request: ChatRequest) -> AgentResponse:
 class LabChatRequest(BaseModel):
     messages: List[ChatMessage]
 
-
-# =============================================================================
-# TODO: Replace hardcoded LAB_TOOLS with dynamic catalog from ToolRegistry
-# Same as AGENT_TOOLS above - this should use ToolRegistry.get_gemini_function_declarations()
-# with appropriate category filters for lab context.
-# =============================================================================
-
-# Lab Agent Tool definitions
-LAB_TOOLS = [
-    {
-        "name": "run_modular_strategy",
-        "description": "Run a modular strategy scan on historical data with custom trigger and bracket configuration.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "trigger_type": {
-                    "type": "string",
-                    "enum": ["ema_cross", "ema_bounce", "rsi_threshold", "ifvg", "orb", "candle_pattern", "time"],
-                    "description": "Type of entry trigger"
-                },
-                "trigger_params": {
-                    "type": "object",
-                    "description": "Parameters for the trigger (e.g., {fast: 9, slow: 21} for ema_cross)"
-                },
-                "bracket_type": {
-                    "type": "string",
-                    "enum": ["atr", "percent", "fixed"],
-                    "description": "Type of stop/take-profit bracket"
-                },
-                "stop_atr": {"type": "number", "description": "Stop loss in ATR multiples", "default": 2.0},
-                "tp_atr": {"type": "number", "description": "Take profit in ATR multiples", "default": 3.0},
-                "start_date": {"type": "string", "description": "Start date YYYY-MM-DD (data: 2025-03-18 to 2025-09-17)"},
-                "weeks": {"type": "integer", "description": "Number of weeks to scan", "minimum": 1, "maximum": 26},
-                "run_name": {"type": "string", "description": "Optional custom name for the run"}
-            },
-            "required": ["trigger_type", "bracket_type", "start_date", "weeks"]
-        }
-    },
-    {
-        "name": "start_live_mode",
-        "description": "Start live trading simulation with real-time YFinance data.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "ticker": {"type": "string", "enum": ["MES=F", "ES=F", "NQ=F", "SPY"], "description": "Ticker symbol"},
-                "strategy": {"type": "string", "enum": ["ema_cross", "ifvg", "orb"], "description": "Strategy to use"}
-            },
-            "required": ["ticker", "strategy"]
-        }
-    },
-    {
-        "name": "query_experiments",
-        "description": "Query the experiment database for past strategy results.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "sort_by": {"type": "string", "enum": ["win_rate", "total_pnl", "total_trades"], "description": "Metric to sort by"},
-                "top_k": {"type": "integer", "description": "Number of results to return", "default": 5}
-            },
-            "required": ["sort_by"]
-        }
-    },
-    {
-        "name": "list_available_runs",
-        "description": "List all available strategy runs that can be visualized.",
-        "parameters": {"type": "object", "properties": {}}
-    }
-]
+# Lab tools now use dynamic catalog (Phase 9 complete)
 
 
 @app.post("/lab/agent")
@@ -955,10 +792,10 @@ Be concise and results-focused."""
         role = "user" if msg.role == "user" else "model"
         gemini_contents.append({"role": role, "parts": [{"text": msg.content}]})
     
-    # Build request with function calling
+    # Build request with function calling (using dynamic lab tool catalog)
     gemini_request = {
         "contents": gemini_contents,
-        "tools": [{"function_declarations": LAB_TOOLS}],
+        "tools": [{"function_declarations": get_lab_tools()}],
         "tool_config": {"function_calling_config": {"mode": "AUTO"}}
     }
     

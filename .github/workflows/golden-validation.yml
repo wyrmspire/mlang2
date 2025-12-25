@@ -1,0 +1,48 @@
+name: Golden File Validation
+
+on:
+  push:
+    branches: [ main, develop, copilot/** ]
+    paths:
+      - 'golden/**'
+      - 'src/viz/**'
+      - 'src/sim/**'
+      - 'src/strategy/**'
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  validate-golden:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.12'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+    
+    - name: Validate golden run artifacts
+      run: |
+        echo "🔍 Validating golden run artifacts..."
+        if [ -d "golden/" ]; then
+          for run_dir in golden/*/; do
+            if [ -d "$run_dir" ]; then
+              echo "Validating: $run_dir"
+              python golden/validator.py "$run_dir" || exit 1
+            fi
+          done
+          echo "✅ All golden runs validated successfully"
+        else
+          echo "⚠️  No golden directory found, skipping"
+        fi
+    
+    - name: Run golden file tests
+      run: |
+        python -m pytest tests/test_golden_runs.py -v --tb=short

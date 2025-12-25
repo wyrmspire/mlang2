@@ -383,5 +383,51 @@ class TestConvenienceFunctions(unittest.TestCase):
         self.assertEqual(len(errors), 0)
 
 
+class TestIndicatorDeclaration(unittest.TestCase):
+    """Test indicator_ids declaration in StrategySpec."""
+    
+    def test_strategy_with_indicators(self):
+        """StrategySpec should declare indicator_ids."""
+        spec = StrategySpec(
+            strategy_id="test_with_indicators",
+            trigger=TriggerConfig(type=TriggerType.EMA_CROSS, params={"fast": 9, "slow": 21}),
+            bracket=BracketConfig(type=BracketType.ATR, stop_atr=2.0, tp_atr=3.0),
+            sizing=SizingConfig(method=SizingMethod.FIXED_CONTRACTS, contracts=1),
+            indicators=['ema_9', 'ema_21', 'atr_14', 'rsi_14']
+        )
+        
+        # Verify indicators are declared
+        self.assertEqual(len(spec.indicators), 4)
+        self.assertIn('ema_9', spec.indicators)
+        self.assertIn('ema_21', spec.indicators)
+        self.assertIn('atr_14', spec.indicators)
+        self.assertIn('rsi_14', spec.indicators)
+        
+        # Verify they serialize
+        spec_dict = spec.to_dict()
+        self.assertIn('indicators', spec_dict)
+        self.assertEqual(spec_dict['indicators'], ['ema_9', 'ema_21', 'atr_14', 'rsi_14'])
+        
+        # Verify they deserialize
+        restored = StrategySpec.from_dict(spec_dict)
+        self.assertEqual(restored.indicators, spec.indicators)
+    
+    def test_strategy_without_indicators(self):
+        """StrategySpec without indicators should have empty list."""
+        spec = StrategySpec(
+            strategy_id="test_no_indicators",
+            trigger=TriggerConfig(type=TriggerType.IFVG),
+            bracket=BracketConfig(type=BracketType.ATR, stop_atr=2.0, tp_atr=3.0),
+            sizing=SizingConfig(method=SizingMethod.FIXED_CONTRACTS, contracts=1)
+        )
+        
+        # Should have empty indicators list
+        self.assertEqual(spec.indicators, [])
+        
+        # Should serialize with empty list
+        spec_dict = spec.to_dict()
+        self.assertEqual(spec_dict['indicators'], [])
+
+
 if __name__ == "__main__":
     unittest.main()

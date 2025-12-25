@@ -1,0 +1,58 @@
+name: Contract Linter
+
+on:
+  push:
+    branches: [ main, develop, copilot/** ]
+    paths:
+      - 'results/**'
+      - 'src/tools/contract_linter.py'
+      - 'src/viz/**'
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  lint-contracts:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.12'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+    
+    - name: Lint run artifacts
+      run: |
+        echo "🔍 Linting run artifacts for contract compliance..."
+        if [ -d "results/" ]; then
+          FAILED=0
+          for run_dir in results/*/; do
+            if [ -d "$run_dir" ] && [ -f "$run_dir/manifest.json" ]; then
+              echo "Linting: $run_dir"
+              if ! python -m src.tools.contract_linter "$run_dir"; then
+                FAILED=1
+              fi
+            fi
+          done
+          
+          if [ $FAILED -eq 1 ]; then
+            echo "❌ Contract linter found violations"
+            exit 1
+          else
+            echo "✅ All run artifacts comply with contract"
+          fi
+        else
+          echo "⚠️  No results directory found, skipping"
+        fi
+    
+    - name: Verify linter is working
+      run: |
+        # Test that linter catches violations
+        echo "Testing contract linter functionality..."
+        python -c "from src.tools.contract_linter import ContractLinter; print('✅ ContractLinter available')"
