@@ -102,15 +102,42 @@ def run_experiment(
     print("Loading data...")
     df = load_continuous_contract()
     
-    # Filter by date range
-    if config.start_date:
-        df = df[df['time'] >= config.start_date]
-    if config.end_date:
-        df = df[df['time'] <= config.end_date]
+    # ========================================
+    # CRITICAL: Add padding to date range for full window coverage
+    # - START: 2 hours before first potential trade entry
+    # - END: max_bars (trade duration) + 2 hours post-exit window
+    #   A trade at end_date can hold for max_bars minutes, 
+    #   then we need 2 more hours for the post-exit window
+    # Without this, enforce_2hour_window() will emit warnings
+    # ========================================
+    from datetime import timedelta
+    
+    # Get max_bars from OCO config (default 50 minutes if not set)
+    max_bars = config.oco_config.max_bars if config.oco_config else 50
+    
+    # Parse dates if they're strings and add padding
+    start_dt = pd.to_datetime(config.start_date) if config.start_date else None
+    end_dt = pd.to_datetime(config.end_date) if config.end_date else None
+    
+    padded_start = start_dt - timedelta(hours=2) if start_dt is not None else None
+    # End needs: max_bars (trade can still be open) + 2 hours (post-exit window)
+    padded_end = end_dt + timedelta(minutes=max_bars, hours=2) if end_dt is not None else None
+    
+    # Localize to match df['time'] timezone if needed
+    if padded_start is not None and padded_start.tzinfo is None and df['time'].dt.tz is not None:
+        padded_start = padded_start.tz_localize(df['time'].dt.tz)
+    if padded_end is not None and padded_end.tzinfo is None and df['time'].dt.tz is not None:
+        padded_end = padded_end.tz_localize(df['time'].dt.tz)
+    
+    # Filter by padded date range
+    if padded_start is not None:
+        df = df[df['time'] >= padded_start]
+    if padded_end is not None:
+        df = df[df['time'] <= padded_end]
     
     df = df.reset_index(drop=True)
     print(f"Data range: {df['time'].min()} to {df['time'].max()}")
-    print(f"Total bars: {len(df)}")
+    print(f"Total bars: {len(df)} (padded by 2h on each side)")
     
     # Resample to higher timeframes
     htf_data = resample_all_timeframes(df)
@@ -123,7 +150,41 @@ def run_experiment(
     
     # 2. Generate decision records
     print("Generating decision records...")
-    stepper = MarketStepper(df, start_idx=200, end_idx=len(df) - 200)
+    
+    # ========================================
+    # CRITICAL: Constrain stepper to ORIGINAL date range
+    # The padded data provides 2h context BEFORE first decision
+    # and max_bars + 2h AFTER last decision
+    # But decisions should ONLY occur within original start_date to end_date
+    # ========================================
+    
+    # Find indices where original dates fall in the padded data
+    if start_dt is not None:
+        # Make start_dt timezone-aware if needed
+        original_start = start_dt
+        if original_start.tzinfo is None and df['time'].dt.tz is not None:
+            original_start = original_start.tz_localize(df['time'].dt.tz)
+        start_mask = df['time'] >= original_start
+        decision_start_idx = start_mask.idxmax() if start_mask.any() else 200
+    else:
+        decision_start_idx = 200
+        
+    if end_dt is not None:
+        # Make end_dt timezone-aware if needed
+        original_end = end_dt
+        if original_end.tzinfo is None and df['time'].dt.tz is not None:
+            original_end = original_end.tz_localize(df['time'].dt.tz)
+        end_mask = df['time'] <= original_end
+        # Get the LAST index where time <= end_dt
+        if end_mask.any():
+            decision_end_idx = df[end_mask].index[-1]
+        else:
+            decision_end_idx = len(df) - 200
+    else:
+        decision_end_idx = len(df) - 200
+    
+    print(f"Decisions restricted to indices {decision_start_idx} to {decision_end_idx} (original date range)")
+    stepper = MarketStepper(df, start_idx=decision_start_idx, end_idx=decision_end_idx)
     scanner = get_scanner(config.scanner_id, **config.scanner_params)
     
     # CRITICAL: Ensure labeler uses the SAME oco_config as viz export

@@ -54,15 +54,20 @@ def enforce_2hour_window(
     window_df = df_1m.loc[mask]
     
     # Check if we have full coverage
-    warning = None
+    warnings = []
     if window_df.empty:
-        warning = f"No data available for window {window_start} to {window_end}"
-    elif window_df['time'].min() > window_start:
-        missing_start = (window_df['time'].min() - window_start).total_seconds() / 60
-        warning = f"Missing {missing_start:.0f} minutes at start of 2h window"
-    elif window_df['time'].max() < window_end:
-        missing_end = (window_end - window_df['time'].max()).total_seconds() / 60
-        warning = f"Missing {missing_end:.0f} minutes at end of 2h window"
+        warnings.append(f"No data available for window {window_start} to {window_end}")
+    else:
+        # Check start coverage
+        if window_df['time'].min() > window_start:
+            missing_start = (window_df['time'].min() - window_start).total_seconds() / 60
+            warnings.append(f"Missing {missing_start:.0f} minutes at start of 2h window")
+        # Check end coverage (not elif - check BOTH)
+        if window_df['time'].max() < window_end:
+            missing_end = (window_end - window_df['time'].max()).total_seconds() / 60
+            warnings.append(f"Missing {missing_end:.0f} minutes at end of 2h window")
+    
+    warning = "; ".join(warnings) if warnings else None
     
     # Format as list of dicts
     raw_ohlcv = [
