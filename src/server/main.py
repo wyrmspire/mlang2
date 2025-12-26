@@ -24,6 +24,8 @@ from src.core.tool_registry import ToolRegistry, ToolCategory
 
 # Import agent tools to register them
 import src.tools.agent_tools  # noqa: F401
+import src.core.strategy_tool  # noqa: F401 - Registers CompositeStrategyRunner
+
 
 
 app = FastAPI(title="MLang2 API", version="1.0.0")
