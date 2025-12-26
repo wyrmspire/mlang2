@@ -68,7 +68,8 @@ export const LiveSessionView: React.FC<LiveSessionViewProps> = ({
     const [availableModels, setAvailableModels] = useState<string[]>([
         'models/ifvg_4class_cnn.pth',
         'models/ifvg_cnn.pth',
-        'models/best_model.pth'
+        'models/best_model.pth',
+        'models/puller_xgb_4class.json'
     ]);
 
     // Entry Configuration (sent to backend)

@@ -7,6 +7,7 @@ Run:
 """
 
 import os
+import sys
 import json
 import re
 from pathlib import Path
@@ -600,6 +601,78 @@ DATA RANGE: March 18 - September 17, 2025.
 Use your tools to help the user. When they ask to run/create/test a strategy, use run_strategy.
 When they want to navigate, use set_index. When they want to load a different run, use load_run.
 Be concise and action-oriented."""
+
+
+
+class StrategyRunRequest(BaseModel):
+    strategy: str
+    start_date: str
+    weeks: int = 1
+    run_name: Optional[str] = None
+    config: Dict[str, Any]
+
+
+@app.post("/agent/run-strategy")
+async def run_strategy_endpoint(request: StrategyRunRequest) -> Dict[str, Any]:
+    """Execute a strategy scan via subprocess."""
+    import subprocess
+    import uuid
+    from datetime import datetime
+    
+    # Generate run ID if not provided
+    if request.run_name:
+        run_id = request.run_name
+    else:
+        # e.g. scan_ema_cross_20250318_120000
+        strategy_type = request.config.get("trigger", {}).get("type", "modular")
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        run_id = f"scan_{strategy_type}_{timestamp}"
+    
+    # output dir
+    out_dir = VIZ_DIR / run_id
+    
+    # Construct command
+    cmd = [
+        sys.executable,  # python
+        "scripts/backtest_modular_strategy.py",
+        "--config", json.dumps(request.config),
+        "--start-date", request.start_date,
+        "--weeks", str(request.weeks),
+        "--out", str(out_dir)
+    ]
+    
+    print(f"[RUN_STRATEGY] Executing: {' '.join(cmd)}")
+    
+    try:
+        # Run synchronous for now so user gets immediate feedback of success/fail
+        # (For long runs, this should be background, but modular scans are usually fast)
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            cwd=os.getcwd()
+        )
+        
+        if result.returncode != 0:
+            print(f"[RUN_STRATEGY] Error: {result.stderr}")
+            return {
+                "success": False,
+                "error": f"Script failed: {result.stderr}"
+            }
+            
+        print(f"[RUN_STRATEGY] Success: {out_dir}")
+        return {
+            "success": True,
+            "run_id": run_id,
+            "output": result.stdout
+        }
+        
+    except Exception as e:
+        print(f"[RUN_STRATEGY] Exception: {e}")
+        return {
+            "success": False,
+            "error": str(e)
+        }
 
 
 @app.post("/agent/chat")

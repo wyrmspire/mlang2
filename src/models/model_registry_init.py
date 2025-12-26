@@ -151,3 +151,84 @@ class IFVG4ClassWrapper:
             'triggered': True,  # Always true - let caller apply threshold
         }
 
+
+@ModelRegistry.register(
+    model_id="puller_xgb_4class",
+    name="Puller XGBoost 4-Class",
+    description="XGBoost model for Puller pattern (LONG_WIN, LONG_LOSS, SHORT_WIN, SHORT_LOSS)",
+    input_schema={
+        "bars": {"type": "array", "description": "OHLCV bars"},
+        "ohlcv": {"type": "array", "shape": [5, 30], "description": "Normalized OHLCV"},
+    },
+    output_schema={
+        "probs": {"type": "array", "shape": [4]},
+        "direction": {"type": "string"},
+        "triggered": {"type": "boolean"},
+    }
+)
+class PullerXGBoostWrapper:
+    """Wrapper for Puller XGBoost 4-class model.
+    
+    Computes features from raw OHLCV bars for inference.
+    """
+    
+    def __init__(self, model_path: str = None, **kwargs):
+        import xgboost as xgb
+        
+        self.model = xgb.XGBClassifier()
+        if model_path:
+            self.model.load_model(model_path)
+        else:
+            self.model.load_model('models/puller_xgb_4class.json')
+    
+    def predict(self, features):
+        import numpy as np
+        
+        # Extract bars or use pre-computed ohlcv
+        bars = features.get('bars', [])
+        
+        # Compute features from bars (pattern indicators that predict win/loss)
+        if len(bars) >= 10:
+            # Compute pattern-based features from price action
+            closes = np.array([b['close'] for b in bars[-30:]])
+            highs = np.array([b['high'] for b in bars[-30:]])
+            lows = np.array([b['low'] for b in bars[-30:]])
+            
+            # Feature 1: Recent volatility (normalized range)
+            atr = np.mean(highs - lows)
+            volatility = atr / closes[-1] if closes[-1] > 0 else 0
+            
+            # Feature 2: Momentum (close change over last 10 bars)
+            momentum = (closes[-1] - closes[-10]) / atr if atr > 0 else 0
+            
+            # Feature 3: Range position (where close is in recent range)
+            range_high = np.max(highs[-20:])
+            range_low = np.min(lows[-20:])
+            range_pos = (closes[-1] - range_low) / (range_high - range_low) if range_high > range_low else 0.5
+            
+            x = np.array([volatility * 100, momentum, range_pos], dtype=np.float32).reshape(1, -1)
+        else:
+            # Fallback: default features
+            x = np.array([50, 0, 0.5], dtype=np.float32).reshape(1, -1)
+        
+        probs = self.model.predict_proba(x)[0].tolist()
+        
+        # 0=LONG_WIN, 1=LONG_LOSS, 2=SHORT_WIN, 3=SHORT_LOSS
+        long_win_prob = probs[0]
+        short_win_prob = probs[2]
+        
+        # Determine direction based on which WIN class has higher prob
+        if long_win_prob > short_win_prob:
+            direction = 'LONG'
+            prob = long_win_prob
+        else:
+            direction = 'SHORT'
+            prob = short_win_prob
+        
+        return {
+            'probs': probs,
+            'long_win_prob': long_win_prob,
+            'short_win_prob': short_win_prob,
+            'direction': direction,
+            'triggered': prob >= 0.35,
+        }

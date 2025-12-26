@@ -83,15 +83,34 @@ def run_scan():
     # - Different Stop/TP ratios
     # - Different Max Duration
     
-    # V6: Scalp only (for clear visualization)
-    variations.append(PullerScanner(variation_id="v6_scalp", entry_unit=0.5, stop_unit=1.0, tp_unit=-2.0))
+    # 10 Variations for multi-OCO training
+    # V1: Default
+    variations.append(PullerScanner(variation_id="v1_default"))
+    # V2: Tighter Entry
+    variations.append(PullerScanner(variation_id="v2_tight_entry", entry_unit=0.5))
+    # V3: Deeper Entry
+    variations.append(PullerScanner(variation_id="v3_deep_entry", entry_unit=1.0))
+    # V4: Wider Stop
+    variations.append(PullerScanner(variation_id="v4_wide_stop", stop_unit=3.0))
+    # V5: Big Target
+    variations.append(PullerScanner(variation_id="v5_big_target", tp_unit=-6.0))
+    # V6: Scalp
+    variations.append(PullerScanner(variation_id="v6_scalp", tp_unit=-2.0, stop_unit=1.0))
+    # V7: Longer Duration
+    variations.append(PullerScanner(variation_id="v7_long_fuse", max_duration_bars=60))
+    # V8: Short Duration
+    variations.append(PullerScanner(variation_id="v8_short_fuse", max_duration_bars=30))
+    # V9: Big Move Required
+    variations.append(PullerScanner(variation_id="v9_big_move", min_move_unit=2.0))
+    # V10: Huge Range Allowed
+    variations.append(PullerScanner(variation_id="v10_huge_range", max_move_unit=3.5))
 
-    # 2. Load Data (9 Weeks)
-    print("\n[2] Loading Data (9 Weeks)...")
+    # 2. Load Data (6 Weeks for training)
+    print("\n[2] Loading Data (6 Weeks)...")
     # End date: 2025-09-17 (Max in data)
-    # Start date: 4 weeks prior
+    # Start date: 6 weeks prior
     end_date = pd.Timestamp("2025-09-17", tz="America/New_York")
-    start_date = end_date - pd.Timedelta(weeks=4)
+    start_date = end_date - pd.Timedelta(weeks=6)
     
     print(f"  Range: {start_date.date()} to {end_date.date()}")
     

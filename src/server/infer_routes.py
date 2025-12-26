@@ -137,15 +137,85 @@ def normalize_window(ohlcv_array):
 @router.post("", response_model=InferResponse)
 async def infer(request: InferRequest) -> InferResponse:
     """
-    Run CNN inference on price window.
+    Run model inference on price window.
     
-    Bars should be last 120 1-minute bars (or at least 60).
+    Supports both CNN (.pth) and other model types via ModelRegistry plugin system.
+    
+    Bars should be last 120 1-minute bars (or at least 30).
     Returns whether to trigger a trade and at what levels.
     
     Model can be specified by:
-    - model_id: Lookup from ExperimentDB (preferred, decouples from filesystem)
-    - model_path: Direct path (legacy)
+    - model_id: Lookup from ModelRegistry (preferred, uses plugin wrappers)
+    - model_path: Direct path (legacy, CNN only)
     """
+    from src.core.registries import ModelRegistry
+    
+    if len(request.bars) < 30:
+        raise HTTPException(400, f"Need at least 30 bars, got {len(request.bars)}")
+    
+    # Prepare bars array for models
+    bars_array = np.array([
+        [b['open'], b['high'], b['low'], b['close'], b.get('volume', 0)]
+        for b in request.bars[-30:]
+    ])
+    
+    current_price = request.bars[-1]['close']
+    atr = abs(request.bars[-1]['high'] - request.bars[-1]['low']) * 2
+    if atr < 0.5: atr = current_price * 0.001
+    
+    # Try ModelRegistry first (plugin system)
+    model_id = None
+    if request.model_path:
+        # Extract model_id from path: "models/puller_xgb_4class.json" -> "puller_xgb_4class"
+        model_id = Path(request.model_path).stem
+    
+    try:
+        registered_models = {m.model_id: m for m in ModelRegistry.list_all()}
+        if model_id and model_id in registered_models:
+            # Use plugin wrapper
+            wrapper = ModelRegistry.create(model_id, model_path=str(request.model_path))
+            
+            # Call wrapper.predict() with bars
+            result = wrapper.predict({'bars': request.bars, 'ohlcv': normalize_window(bars_array)})
+            
+            # Extract response from wrapper result
+            triggered = result.get('triggered', False)
+            direction = result.get('direction', 'NONE')
+            prob = result.get('long_win_prob', 0) if direction == 'LONG' else result.get('short_win_prob', 0)
+            
+            # Apply threshold
+            if prob < request.threshold:
+                triggered = False
+                direction = 'NONE'
+            
+            # Calculate levels
+            if direction == 'LONG':
+                entry = current_price
+                stop = entry - (2 * atr)
+                tp = entry + (4 * atr)
+            elif direction == 'SHORT':
+                entry = current_price
+                stop = entry + (2 * atr)
+                tp = entry - (4 * atr)
+            else:
+                entry = current_price
+                stop = 0
+                tp = 0
+            
+            return InferResponse(
+                triggered=triggered,
+                direction=direction,
+                probability=round(prob, 4),
+                entry_price=round(entry, 2),
+                stop_price=round(stop, 2),
+                tp_price=round(tp, 2)
+            )
+    except Exception as e:
+        # Fall through to legacy CNN loading
+        print(f"[infer] ModelRegistry failed: {e}, falling back to legacy")
+        pass
+    
+    # Legacy path: direct PyTorch model loading
     # Resolve model path and architecture config
     arch_config = None
     
@@ -175,8 +245,6 @@ async def infer(request: InferRequest) -> InferResponse:
     if not model_path.exists():
         raise HTTPException(404, f"Model not found: {model_path}")
     
-    if len(request.bars) < 30:
-        raise HTTPException(400, f"Need at least 30 bars, got {len(request.bars)}")
     
     # Load model
     model = load_model(model_path)
