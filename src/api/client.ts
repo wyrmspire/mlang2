@@ -270,5 +270,29 @@ export const api = {
             throw new Error(`YFinance fetch failed: ${response.status}`);
         }
         return response.json();
+    },
+
+    // Experiments API
+    getExperiments: async (sort: string = "created_at", limit: number = 100): Promise<any[]> => {
+        const hasBackend = await checkBackend();
+        if (!hasBackend) throw new Error('Backend unavailable');
+        const response = await fetch(`${API_BASE}/experiments?sort_by=${sort}&limit=${limit}`);
+        if (!response.ok) throw new Error('Failed to fetch experiments');
+        return response.json();
+    },
+
+    deleteExperiment: async (runId: string): Promise<void> => {
+        const hasBackend = await checkBackend();
+        if (!hasBackend) throw new Error('Backend unavailable');
+        const response = await fetch(`${API_BASE}/experiments/${runId}`, { method: 'DELETE' });
+        if (!response.ok) throw new Error('Failed to delete experiment');
+    },
+
+    getExperimentsSummary: async (): Promise<any[]> => {
+        const hasBackend = await checkBackend();
+        if (!hasBackend) throw new Error('Backend unavailable');
+        const response = await fetch(`${API_BASE}/experiments/summary`);
+        if (!response.ok) throw new Error('Failed to fetch summary');
+        return response.json();
     }
 };

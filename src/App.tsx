@@ -8,9 +8,10 @@ import { DetailsPanel } from './components/DetailsPanel';
 import { ChatAgent } from './components/ChatAgent';
 import { LiveSessionView } from './components/LiveSessionView';
 import { StatsPanel } from './components/StatsPanel';
+import { ExperimentsView } from './components/ExperimentsView';
 import { LabPage } from './components/LabPage';
 
-type PageType = 'trade' | 'lab';
+type PageType = 'trade' | 'lab' | 'experiments';
 
 const App: React.FC = () => {
   const [currentPage, setCurrentPage] = useState<PageType>('trade');
@@ -61,13 +62,19 @@ const App: React.FC = () => {
   // Load run-specific data
   useEffect(() => {
     if (currentRun) {
+      // Handle Light Mode (missing files) gracefully
       Promise.all([
-        api.getDecisions(currentRun),
-        api.getTrades(currentRun)
+        api.getDecisions(currentRun).catch(() => []),
+        api.getTrades(currentRun).catch(() => [])
       ]).then(([d, t]) => {
         setDecisions(d);
         setTrades(t);
         setIndex(0); // Reset index on run change
+
+        if (d.length === 0 && t.length === 0) {
+          console.warn("Run loaded with no data (likely Light Mode)");
+          // Optional: alert user
+        }
       });
     }
   }, [currentRun]);
@@ -178,6 +185,30 @@ const App: React.FC = () => {
     );
   }
 
+  // If Experiments page
+  if (currentPage === 'experiments') {
+    return (
+      <div className="flex flex-col h-screen w-full bg-slate-900 overflow-hidden">
+        <div className="h-12 flex items-center gap-4 px-4 bg-slate-800 border-b border-slate-700 shrink-0">
+          <button
+            onClick={() => setCurrentPage('trade')}
+            className="text-slate-400 hover:text-white px-3 py-1"
+          >
+            Back to Trade View
+          </button>
+        </div>
+        <div className="flex-1 overflow-hidden min-h-0">
+          <ExperimentsView
+            onOpenRun={(runId) => {
+              setCurrentRun(runId);
+              setCurrentPage('trade');
+            }}
+          />
+        </div>
+      </div>
+    );
+  }
+
   // Trade View (default)
   return (
     <div className="flex h-screen w-full bg-slate-900 overflow-hidden">
@@ -189,12 +220,20 @@ const App: React.FC = () => {
         <div className="h-16 flex items-center justify-between px-4 border-b border-slate-700 shrink-0">
           <div className="flex items-center gap-3">
             <h1 className="font-bold text-white text-lg">Trade Viz</h1>
-            <button
-              onClick={() => setCurrentPage('lab')}
-              className="bg-green-600 hover:bg-green-500 text-white text-xs px-2 py-1 rounded"
-            >
-              🔬 Lab
-            </button>
+            <div className="flex gap-1">
+              <button
+                onClick={() => setCurrentPage('experiments')}
+                className="bg-blue-600 hover:bg-blue-500 text-white text-xs px-2 py-1 rounded"
+              >
+                🧪 Exp
+              </button>
+              <button
+                onClick={() => setCurrentPage('lab')}
+                className="bg-green-600 hover:bg-green-500 text-white text-xs px-2 py-1 rounded"
+              >
+                🔬 Lab
+              </button>
+            </div>
           </div>
           <button
             onClick={() => {
@@ -206,6 +245,8 @@ const App: React.FC = () => {
             ▶ Replay
           </button>
         </div>
+
+        {/* ... rest of sidebar ... */}
 
         {/* Scrollable Content */}
         <div className="flex-1 overflow-y-auto overflow-x-hidden p-2 space-y-4">

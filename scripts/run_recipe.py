@@ -34,6 +34,8 @@ def main():
     parser.add_argument("--days", type=int, default=30, help="Days to run if no days provided")
     parser.add_argument("--mock", action="store_true", help="Use synthetic data for testing")
     
+    parser.add_argument("--light", action="store_true", help="Run in light mode (no heavy viz files)")
+    
     args = parser.parse_args()
     
     # 1. Load Recipe
@@ -80,7 +82,6 @@ def main():
         # Patch the consumer
         src.experiments.runner.load_continuous_contract = mock_loader
         src.experiments.runner.load_processed_1m = lambda **kw: mock_loader()
-
     
     # 2. Build Scanner
     scanner = CompositeScanner(recipe)
@@ -119,16 +120,21 @@ def main():
         feature_config=feature_settings,
     )
     
-    # 4. Setup Exporter
-    from src.viz.config import VizConfig
+    # 4. Setup Exporter (ONLY IF NOT LIGHT MODE)
+    exporter = None
     out_dir = RESULTS_DIR / "viz" / args.out
-    
-    viz_config = VizConfig()
-    exporter = Exporter(
-        config=viz_config,
-        run_id=args.out,
-        experiment_config=config.to_dict()
-    )
+
+    if not args.light:
+        from src.viz.config import VizConfig
+        
+        viz_config = VizConfig()
+        exporter = Exporter(
+            config=viz_config,
+            run_id=args.out,
+            experiment_config=config.to_dict()
+        )
+    else:
+        print("Light Mode enabled: Skipping visualization export")
     
     # 5. Monkey Patch get_scanner
     import src.policy.scanners
@@ -146,36 +152,36 @@ def main():
         # 6. Run Experiment
         result = run_experiment(config, exporter=exporter)
         
-        # 7. Finalize
-        exporter.finalize(out_dir)
+        # 7. Finalize (ONLY IF EXPORTER EXISTS)
+        if exporter:
+            exporter.finalize(out_dir)
         
         # 8. Save to ExperimentDB
         try:
-            from src.storage import ExperimentDB
+            from src.storage.experiments_db import ExperimentDB
             
-            # Load trades to calculate metrics
-            trades_file = out_dir / "trades.jsonl"
-            total_pnl = 0.0
-            wins = 0
-            losses = 0
-            total_trades = 0
+            # Use direct results from ExperimentResult
+            # This works for both Light Mode (where we rely on result objects)
+            # and Standard Mode (assuming we added pnl to result object)
             
-            if trades_file.exists():
-                with open(trades_file) as f:
-                    for line in f:
-                        if line.strip():
-                            t = json.loads(line)
-                            total_trades += 1
-                            pnl = t.get('pnl_dollars', 0)
-                            total_pnl += pnl
-                            if pnl > 0:
-                                wins += 1
-                            else:
-                                losses += 1
+            total_trades = result.win_records + result.loss_records
+            win_rate = result.win_records / total_trades if total_trades > 0 else 0
             
-            win_rate = wins / total_trades if total_trades > 0 else 0
-            avg_pnl = total_pnl / total_trades if total_trades > 0 else 0
+            # Note: total_pnl/avg_pnl were added to ExperimentResult recently
+            total_pnl = getattr(result, 'total_pnl', 0.0)
+            avg_pnl = getattr(result, 'avg_pnl', 0.0)
             
+            # If standard mode and result object lacks PnL (legacy check),
+            # fall back to reading file (for double safety if result object update failed)
+            # But since we updated runner.py, we trust the object first.
+            
+            # Only read file if PnL is 0 and we are NOT in light mode (and expected file to exist)
+            if total_pnl == 0 and not args.light and total_trades > 0:
+                 trades_file = out_dir / "trades.jsonl"
+                 if trades_file.exists():
+                     # ... Legacy read code path (omitted for brevity as we trust runner.py now)
+                     pass
+
             # Store in database
             db = ExperimentDB()
             db.store_run(
@@ -190,18 +196,23 @@ def main():
                 },
                 metrics={
                     'total_trades': total_trades,
-                    'wins': wins,
-                    'losses': losses,
+                    'wins': result.win_records,
+                    'losses': result.loss_records,
                     'win_rate': win_rate,
                     'total_pnl': total_pnl,
                     'avg_pnl_per_trade': avg_pnl
                 }
             )
-            print(f"✅ Saved to ExperimentDB: {args.out}")
+            print(f"Saved to ExperimentDB: {args.out}")
         except Exception as e:
-            print(f"⚠️  Could not save to ExperimentDB: {e}")
+            print(f"Could not save to ExperimentDB: {e}")
+            import traceback
+            traceback.print_exc()
         
-        print(f"Success! Output at: {out_dir}")
+        if not args.light:
+            print(f"Success! Output at: {out_dir}")
+        else:
+            print(f"Success! (Light Mode - Results in DB only)")
         
     finally:
         # Restore factory

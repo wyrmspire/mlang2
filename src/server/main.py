@@ -46,6 +46,10 @@ app.include_router(replay_router)
 from src.server.infer_routes import router as infer_router
 app.include_router(infer_router)
 
+# Mount experiments router
+from src.server.db_routes import router as db_router
+app.include_router(db_router)
+
 
 # CORS for frontend
 app.add_middleware(
@@ -651,7 +655,7 @@ class StrategyRunRequest(BaseModel):
     weeks: int = 1
     run_name: Optional[str] = None
     config: Dict[str, Any]
-
+    light: bool = False  # Default to full visualization
 
 @app.post("/agent/run-strategy")
 async def run_strategy_endpoint(request: StrategyRunRequest) -> Dict[str, Any]:
@@ -699,6 +703,10 @@ async def run_strategy_endpoint(request: StrategyRunRequest) -> Dict[str, Any]:
             "--out", run_id,
             "--start-date", request.start_date,
         ]
+        
+        # Add light mode flag if requested
+        if request.light:
+            cmd.append("--light")
         
         # Calculate end date from weeks
         from datetime import timedelta
@@ -749,11 +757,6 @@ async def run_strategy_endpoint(request: StrategyRunRequest) -> Dict[str, Any]:
             Path(recipe_path).unlink()
         except:
             pass
-
-        return {
-            "success": False,
-            "error": str(e)
-        }
 
 
 @app.post("/agent/chat")

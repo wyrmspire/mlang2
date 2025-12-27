@@ -38,6 +38,11 @@ from typing import Dict, Any
                 "type": "boolean",
                 "description": "Use synthetic data for testing",
                 "default": False
+            },
+            "light_mode": {
+                "type": "boolean",
+                "description": "Run in light mode (no heavy visualization files)",
+                "default": False
             }
         },
         "required": ["recipe_path", "output_name"]
@@ -72,6 +77,7 @@ class CompositeStrategyRunner:
             start_date: Optional start date
             end_date: Optional end date
             use_mock_data: Whether to use mock data
+            light_mode: Whether to run in light mode
             
         Returns:
             Dict with success status and output location
@@ -81,6 +87,7 @@ class CompositeStrategyRunner:
         start_date = inputs.get("start_date")
         end_date = inputs.get("end_date")
         use_mock = inputs.get("use_mock_data", False)
+        light_mode = inputs.get("light_mode", False)
         
         # Build command
         cmd = [
@@ -95,6 +102,8 @@ class CompositeStrategyRunner:
             cmd.extend(["--end-date", end_date])
         if use_mock:
             cmd.append("--mock")
+        if light_mode:
+            cmd.append("--light")
         
         try:
             # Execute

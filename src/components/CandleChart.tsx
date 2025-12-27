@@ -357,9 +357,9 @@ export const CandleChart: React.FC<CandleChartProps> = ({
                     endTime = parseTime(endBar.time) as Time;
                 }
             } else {
-                // Default: 50 minutes converted to bars
+                // Default: 2 hours (120 minutes) converted to bars
                 const intervalMinutes = { '1m': 1, '5m': 5, '15m': 15, '1h': 60, '4h': 240 }[timeframe] || 1;
-                const barsOnThisTF = Math.max(1, Math.ceil(50 / intervalMinutes));
+                const barsOnThisTF = Math.max(1, Math.ceil(120 / intervalMinutes));
                 const endBarIdx = Math.min(startBarIdx + barsOnThisTF, aggregatedBars.length - 1);
                 const endBar = aggregatedBars[endBarIdx];
                 if (endBar) {

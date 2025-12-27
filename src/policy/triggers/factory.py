@@ -25,7 +25,10 @@ from .sweep import SweepTrigger
 from .or_false_break import ORFalseBreakTrigger
 from .vwap_reclaim import VWAPReclaimTrigger
 
-# ...
+
+# Global Registry
+TRIGGER_REGISTRY: Dict[str, Any] = {}
+
 
 def register_triggers():
     """Populate registry. Call this once or ensure imports happen."""
