@@ -1,3 +1,16 @@
+1-use-the-factory---do-not-hand-code never-create-a-strategy-file-manually context-scripts-create-strategy-py-is-the-only-safe-way-to-mint-a-strategy-it-guarantees-imports-inheritance-and-types-align-with-the-golden-path the-rule-if-you-need-a-new-kind-of-strategy-upgrade-the-template-in-create-strategy-py-first-then-generate-it
+
+2-asset-first-logic if-it-is-useful-for-more-than-one-strategy-it-does-not-belong-in-the-strategy context-strategies-in-src-policy-library-should-be-thin-glue-code the-rule- new-indicator-add-it-to-src-features-indicators-py new-price-pattern-create-src-features-patterns-py-or-add-to-src-policy-filters-py-and-call-it new-level-add-it-to-src-features-levels-py-e-g-previous-week-high
+
+3-the-causal-wall you-may-look-at-state-but-never-df context-marketstate-is-a-heavily-guarded-object-that-prevents-looking-into-the-future-raw-dataframes-are-dangerous the-rule-your-strategies-scan-method-acts-on-state-and-features-you-are-forbidden-from-importing-pandas-to-hack-the-raw-data
+
+4-red-green-refactor-loop-is-mandatory a-run-without-a-green-validation-check-is-a-failed-run context-the-golden-validate-run-py-script-checks-for-invisible-corruptions-that-the-ui-glosses-over the-rule- 1-create-strategy-py 2-backtest-walkforward-viz-py 3-validate-run-py---must-pass 4-then-you-can-show-it-to-the-user
+
+tooling-advice to-create-other-scans-slightly-different-etc---tell-the-agent-to-parameterize-the-create-strategy-py-tool current-state-it-takes-a-name-and-basic-template future-state-agent-update-create-strategy-py-to-accept---type-mean-reversion-or---type-breakout-which-uses-different-logic-skeletons
+
+
+
+
 # 🚨 DEFINITIVE GOLDEN PATHS — DO NOT DEVIATE
 
 The system has **two explicit golden paths**.

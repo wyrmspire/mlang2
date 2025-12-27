@@ -25,6 +25,9 @@ from src.core.tool_registry import ToolRegistry, ToolCategory
 # Import agent tools to register them
 import src.tools.agent_tools  # noqa: F401
 import src.core.strategy_tool  # noqa: F401 - Registers CompositeStrategyRunner
+import src.skills.indicator_skills  # noqa: F401 - Registers indicator tools
+import src.skills.data_skills  # noqa: F401 - Registers data tools
+
 
 
 
@@ -547,9 +550,9 @@ GEMINI_MODEL = "gemini-2.0-flash-exp"
 # =============================================================================
 
 def get_agent_tools() -> List[Dict[str, Any]]:
-    """Get tools for main agent (strategy + utility)."""
+    """Get tools for main agent (strategy + utility + indicators)."""
     return ToolRegistry.get_gemini_function_declarations(
-        categories=[ToolCategory.STRATEGY, ToolCategory.UTILITY]
+        categories=[ToolCategory.STRATEGY, ToolCategory.UTILITY, ToolCategory.INDICATOR]
     )
 
 
@@ -616,43 +619,67 @@ class StrategyRunRequest(BaseModel):
 
 @app.post("/agent/run-strategy")
 async def run_strategy_endpoint(request: StrategyRunRequest) -> Dict[str, Any]:
-    """Execute a strategy scan via subprocess."""
+    """Execute a strategy scan via subprocess using the new run_recipe.py."""
     import subprocess
-    import uuid
+    import tempfile
     from datetime import datetime
+    from pathlib import Path
     
     # Generate run ID if not provided
     if request.run_name:
         run_id = request.run_name
     else:
-        # e.g. scan_ema_cross_20250318_120000
         strategy_type = request.config.get("trigger", {}).get("type", "modular")
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         run_id = f"scan_{strategy_type}_{timestamp}"
     
-    # output dir
-    out_dir = VIZ_DIR / run_id
+    # Create a temporary recipe file from the config
+    recipe = {
+        "name": f"Agent Strategy: {run_id}",
+        "cooldown_bars": 20,
+        "entry_trigger": request.config.get("trigger", {}),
+        "oco": {
+            "entry": "MARKET",
+            "take_profit": {
+                "multiple": request.config.get("bracket", {}).get("tp_atr", 2.0)
+            },
+            "stop_loss": {
+                "multiple": request.config.get("bracket", {}).get("stop_atr", 1.0)
+            }
+        }
+    }
     
-    # Construct command
-    cmd = [
-        sys.executable,  # python
-        "scripts/backtest_modular_strategy.py",
-        "--config", json.dumps(request.config),
-        "--start-date", request.start_date,
-        "--weeks", str(request.weeks),
-        "--out", str(out_dir)
-    ]
-    
-    print(f"[RUN_STRATEGY] Executing: {' '.join(cmd)}")
+    # Write recipe to temp file
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+        json.dump(recipe, f, indent=2)
+        recipe_path = f.name
     
     try:
-        # Run synchronous for now so user gets immediate feedback of success/fail
-        # (For long runs, this should be background, but modular scans are usually fast)
+        # Construct command using run_recipe.py (the new Golden Path script)
+        cmd = [
+            sys.executable,  # python
+            "-m", "scripts.run_recipe",
+            "--recipe", recipe_path,
+            "--out", run_id,
+            "--start-date", request.start_date,
+        ]
+        
+        # Calculate end date from weeks
+        from datetime import timedelta
+        import pandas as pd
+        start_dt = pd.to_datetime(request.start_date)
+        end_dt = start_dt + timedelta(weeks=request.weeks)
+        cmd.extend(["--end-date", end_dt.strftime("%Y-%m-%d")])
+        
+        print(f"[RUN_STRATEGY] Executing: {' '.join(cmd)}")
+        
+        # Run synchronous for immediate feedback
         result = subprocess.run(
             cmd,
             capture_output=True,
             text=True,
-            cwd=os.getcwd()
+            cwd=os.getcwd(),
+            timeout=300  # 5 minute timeout
         )
         
         if result.returncode != 0:
@@ -662,15 +689,31 @@ async def run_strategy_endpoint(request: StrategyRunRequest) -> Dict[str, Any]:
                 "error": f"Script failed: {result.stderr}"
             }
             
-        print(f"[RUN_STRATEGY] Success: {out_dir}")
+        print(f"[RUN_STRATEGY] Success: {run_id}")
         return {
             "success": True,
             "run_id": run_id,
             "output": result.stdout
         }
         
+    except subprocess.TimeoutExpired:
+        return {
+            "success": False,
+            "error": "Strategy execution timed out after 5 minutes"
+        }
     except Exception as e:
         print(f"[RUN_STRATEGY] Exception: {e}")
+        return {
+            "success": False,
+            "error": str(e)
+        }
+    finally:
+        # Clean up temp recipe file
+        try:
+            Path(recipe_path).unlink()
+        except:
+            pass
+
         return {
             "success": False,
             "error": str(e)

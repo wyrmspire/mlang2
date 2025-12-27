@@ -8,102 +8,176 @@ from typing import Dict, Any, List, Optional
 import pandas as pd
 from datetime import datetime
 
+from src.core.tool_registry import ToolRegistry, ToolCategory
 from src.features import indicators
 from src.features import indicators_pro
 from src.features import fvg
 
 
-def get_rsi(
-    prices: List[float],
-    period: int = 14
-) -> List[float]:
-    """
-    Calculate RSI for a list of prices.
-    Returns list of RSI values (same length, padded with 50).
-    """
-    series = pd.Series(prices)
-    rsi = indicators.calculate_rsi(series, period)
-    return rsi.tolist()
+@ToolRegistry.register(
+    tool_id="get_rsi",
+    category=ToolCategory.INDICATOR,
+    name="Get RSI",
+    description="Calculate RSI (Relative Strength Index) for a list of prices",
+    input_schema={
+        "type": "object",
+        "properties": {
+            "prices": {
+                "type": "array",
+                "items": {"type": "number"},
+                "description": "List of price values"
+            },
+            "period": {
+                "type": "integer",
+                "description": "RSI period (default: 14)",
+                "default": 14
+            }
+        },
+        "required": ["prices"]
+    },
+    output_schema={
+        "type": "object",
+        "properties": {
+            "rsi_values": {
+                "type": "array",
+                "items": {"type": "number"}
+            }
+        }
+    }
+)
+class GetRSITool:
+    def execute(self, prices: List[float], period: int = 14, **kwargs) -> Dict[str, Any]:
+        """Calculate RSI for a list of prices."""
+        series = pd.Series(prices)
+        rsi = indicators.calculate_rsi(series, period)
+        return {"rsi_values": rsi.tolist()}
 
 
-def get_previous_rsi(
-    df: pd.DataFrame,
-    period: int = 14,
-    lookback: int = 1
-) -> float:
-    """
-    Get the RSI value from N bars ago.
-    """
-    if 'close' not in df.columns:
-        raise ValueError("DataFrame must have 'close' column")
+@ToolRegistry.register(
+    tool_id="check_ema_cross",
+    category=ToolCategory.INDICATOR,
+    name="Check EMA Cross",
+    description="Check if fast EMA crossed slow EMA on the most recent bar",
+    input_schema={
+        "type": "object",
+        "properties": {
+            "symbol": {
+                "type": "string",
+                "description": "Symbol to check (default: MES)",
+                "default": "continuous"
+            },
+            "fast": {
+                "type": "integer",
+                "description": "Fast EMA period",
+                "default": 9
+            },
+            "slow": {
+                "type": "integer",
+                "description": "Slow EMA period",
+                "default": 21
+            },
+            "lookback_bars": {
+                "type": "integer",
+                "description": "Number of bars to analyze",
+                "default": 100
+            }
+        }
+    },
+    output_schema={
+        "type": "object",
+        "properties": {
+            "cross_type": {
+                "type": "string",
+                "enum": ["BULLISH", "BEARISH", "NONE"]
+            },
+            "fast_value": {"type": "number"},
+            "slow_value": {"type": "number"}
+        }
+    }
+)
+class CheckEMACrossTool:
+    def execute(self, symbol: str = "continuous", fast: int = 9, slow: int = 21, lookback_bars: int = 100, **kwargs) -> Dict[str, Any]:
+        """Check if EMA cross occurred."""
+        from src.data.loader import load_continuous_contract
         
-    rsi_series = indicators.calculate_rsi(df['close'], period)
-    
-    if len(rsi_series) <= lookback:
-        return 50.0
+        df = load_continuous_contract()
+        if len(df) > lookback_bars:
+            df = df.tail(lookback_bars)
         
-    return float(rsi_series.iloc[-lookback - 1])
-
-
-def find_fvgs(
-    opens: List[float],
-    highs: List[float],
-    lows: List[float],
-    closes: List[float],
-    min_size_ticks: float = 0.0
-) -> List[Dict[str, Any]]:
-    """
-    Identify Fair Value Gaps in price data.
-    """
-    df = pd.DataFrame({
-        'open': opens,
-        'high': highs,
-        'low': lows,
-        'close': closes
-    })
-    
-    # Use internal FVG logic
-    # Note: Internal logic expects specific dataframe structure
-    # We simplified here for the skill interface
-    
-    gaps = []
-    # (Simplified implementation matching the atomic need)
-    # Real implementation would call src.features.fvg.find_fvg
-    
-    return gaps 
-
-
-def get_ema(
-    prices: List[float],
-    period: int
-) -> List[float]:
-    """Calculate EMA."""
-    return indicators.calculate_ema(pd.Series(prices), period).tolist()
-
-
-def check_ema_cross(
-    df: pd.DataFrame,
-    fast: int = 9,
-    slow: int = 21
-) -> str:
-    """
-    Check if fast EMA crossed slow EMA on the MOST RECENT bar.
-    Returns: "BULLISH", "BEARISH", or "NONE"
-    """
-    ema_fast = indicators.calculate_ema(df['close'], fast)
-    ema_slow = indicators.calculate_ema(df['close'], slow)
-    
-    if len(df) < 2:
-        return "NONE"
+        ema_fast = indicators.calculate_ema(df['close'], fast)
+        ema_slow = indicators.calculate_ema(df['close'], slow)
         
-    curr_fast = ema_fast.iloc[-1]
-    curr_slow = ema_slow.iloc[-1]
-    prev_fast = ema_fast.iloc[-2]
-    prev_slow = ema_slow.iloc[-2]
-    
-    if prev_fast <= prev_slow and curr_fast > curr_slow:
-        return "BULLISH"
-    elif prev_fast >= prev_slow and curr_fast < curr_slow:
-        return "BEARISH"
+        if len(df) < 2:
+            return {"cross_type": "NONE", "fast_value": 0.0, "slow_value": 0.0}
+            
+        curr_fast = float(ema_fast.iloc[-1])
+        curr_slow = float(ema_slow.iloc[-1])
+        prev_fast = float(ema_fast.iloc[-2])
+        prev_slow = float(ema_slow.iloc[-2])
         
-    return "NONE"
+        cross_type = "NONE"
+        if prev_fast <= prev_slow and curr_fast > curr_slow:
+            cross_type = "BULLISH"
+        elif prev_fast >= prev_slow and curr_fast < curr_slow:
+            cross_type = "BEARISH"
+            
+        return {
+            "cross_type": cross_type,
+            "fast_value": curr_fast,
+            "slow_value": curr_slow
+        }
+
+
+@ToolRegistry.register(
+    tool_id="get_current_rsi",
+    category=ToolCategory.INDICATOR,
+    name="Get Current RSI",
+    description="Get the current RSI value for a symbol",
+    input_schema={
+        "type": "object",
+        "properties": {
+            "symbol": {
+                "type": "string",
+                "description": "Symbol (default: continuous)",
+                "default": "continuous"
+            },
+            "period": {
+                "type": "integer",
+                "description": "RSI period",
+                "default": 14
+            },
+            "lookback_bars": {
+                "type": "integer",
+                "description": "Number of bars to use for calculation",
+                "default": 50
+            }
+        }
+    },
+    output_schema={
+        "type": "object",
+        "properties": {
+            "rsi": {"type": "number"},
+            "timestamp": {"type": "string"}
+        }
+    }
+)
+class GetCurrentRSITool:
+    def execute(self, symbol: str = "continuous", period: int = 14, lookback_bars: int = 50, **kwargs) -> Dict[str, Any]:
+        """Get current RSI value."""
+        from src.data.loader import load_continuous_contract
+        
+        df = load_continuous_contract()
+        if len(df) > lookback_bars:
+            df = df.tail(lookback_bars)
+        
+        if len(df) < period + 1:
+            return {"rsi": 50.0, "timestamp": ""}
+            
+        rsi_series = indicators.calculate_rsi(df['close'], period)
+        current_rsi = float(rsi_series.iloc[-1])
+        timestamp = str(df['time'].iloc[-1])
+        
+        return {
+            "rsi": current_rsi,
+            "timestamp": timestamp
+        }
