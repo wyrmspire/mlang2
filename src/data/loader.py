@@ -17,7 +17,7 @@ def load_continuous_contract(
     tz: ZoneInfo = NY_TZ
 ) -> pd.DataFrame:
     """
-    Load continuous contract data from JSON file.
+    Load continuous contract data from Parquet (preferred) or JSON file.
     
     Args:
         path: Path to JSON file. Defaults to CONTINUOUS_CONTRACT_PATH.
@@ -28,6 +28,18 @@ def load_continuous_contract(
         Index is NOT set (time is a column).
         Time column is timezone-aware in target tz.
     """
+    # Try parquet first (10x faster)
+    parquet_path = PROCESSED_DIR / "continuous_1m.parquet"
+    if parquet_path.exists():
+        df = pd.read_parquet(parquet_path)
+        if 'time' in df.columns:
+            # Ensure timezone conversion
+            if df['time'].dt.tz is None:
+                df['time'] = df['time'].dt.tz_localize('UTC')
+            df['time'] = df['time'].dt.tz_convert(tz)
+        return df
+    
+    # Fall back to JSON
     path = path or CONTINUOUS_CONTRACT_PATH
     
     with open(path, 'r') as f:
