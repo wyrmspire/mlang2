@@ -134,7 +134,7 @@ class RunStrategyTool:
             "silent": {
                 "type": "boolean",
                 "description": "If true, run silently without forcing visualization UI (default: false)",
-                "default": false
+                "default": False
             }
         },
         "required": ["trigger_type", "bracket_type", "start_date", "weeks"]

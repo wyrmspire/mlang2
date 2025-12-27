@@ -565,6 +565,20 @@ def get_lab_tools() -> List[Dict[str, Any]]:
     """Get tools for lab agent (all categories)."""
     return ToolRegistry.get_gemini_function_declarations()
 
+@app.delete("/experiments/clear")
+async def clear_all_experiments():
+    try:
+        conn = get_db_connection()
+        conn.execute("DELETE FROM experiments")
+        conn.execute("DELETE FROM trades")
+        conn.execute("DELETE FROM decisions")
+        conn.commit()
+        conn.close()
+        return {"status": "success", "message": "All run data cleared"}
+    except Exception as e:
+        print(f"Error clearing experiments: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 def build_agent_system_prompt(context: ChatContext, decisions: List[Dict], trades: List[Dict]) -> str:
     """Build system prompt for the trade viz agent."""
@@ -914,13 +928,23 @@ YOUR TOOLS:
 5. get_rsi - Calculate RSI values
 
 TRIGGER TYPES:
-- ema_cross: EMA crossover (params: fast, slow) 
+- ema_cross: EMA crossover (params: fast, slow) DO NOT use fast_period/slow_period
 - ema_bounce: Price bouncing off EMA (params: period, threshold)
 - rsi_threshold: RSI extremes (params: overbought, oversold)
-- ifvg: Institutional fair value gaps
-- orb: Opening range breakout (params: range_minutes)
-- candle_pattern: Candlestick patterns (params: pattern)
-- time: Time-based (params: hour, minute)
+- rejection: Wick Rejection (params: lookback=6, extension_factor=1.5)
+- pin_bar: Pin Bar (params: wick_ratio=0.66)
+- engulfing: Engulfing Candle (no params)
+- inside_bar: Inside Bar (no params)
+- ifvg: Institutional fair value gaps (no params)
+- ord: Opening range breakout
+- time: Time-based
+
+ENTRY TYPES:
+- market: Enter at open
+- limit_offset: Limit at Close +/- Offset
+- retrace_signal: Limit at X% retrace of signal bar (params: pct=0.5)
+- retrace_timeframe: Limit at X% retrace of specific timeframe (params: pct=0.5, timeframe='15m')
+- breakout: Stop-Limit at High/Low + Offset
 
 BRACKET TYPES:
 - atr: ATR-based stops/TPs (stop_atr, tp_atr)

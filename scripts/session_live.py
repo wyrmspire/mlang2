@@ -121,27 +121,16 @@ def main():
     parser.add_argument("--speed", type=float, default=10.0, help="Historical playback speed")
     
     # Entry scan configuration
-    parser.add_argument("--entry-type", type=str, default="market", 
-                       choices=["market", "limit"], help="Entry type")
-    parser.add_argument("--stop-method", type=str, default="atr",
-                       choices=["atr", "swing", "fixed_bars"], help="Stop placement method")
-    parser.add_argument("--tp-method", type=str, default="atr",
-                       choices=["atr", "r_multiple"], help="Take profit method")
-    parser.add_argument("--stop-atr", type=float, default=1.0, help="ATR multiple for stop")
-    parser.add_argument("--tp-atr", type=float, default=2.0, help="ATR multiple for TP")
-    parser.add_argument("--tp-r", type=float, default=2.0, help="R-multiple for TP")
+    parser.add_argument("--entry-params", type=str, default="{}", help="JSON entry params")
     
     args = parser.parse_args()
     
-    # Build entry config
-    entry_config = EntryConfig(
-        entry_type=args.entry_type,
-        stop_method=args.stop_method,
-        tp_method=args.tp_method,
-        stop_atr_multiple=args.stop_atr,
-        tp_atr_multiple=args.tp_atr,
-        tp_r_multiple=args.tp_r
-    )
+    # Initialize OCO Engine
+    from src.sim.oco_engine import OCOEngine, OCOConfig, StopConfig
+    from src.sim.costs import DEFAULT_COSTS
+    
+    oco_engine = OCOEngine(costs=DEFAULT_COSTS)
+    entry_params = json.loads(args.entry_params)
     
     emit('STATUS', {'message': f'Initializing Live Mode for {args.ticker}...'})
     
@@ -195,18 +184,6 @@ def main():
         bar = step.bar
         
         # Determine if this is a "New Live Bar" or "History Bar"
-        # Since we sent history in batch, we ONLY emit BAR events for new updates
-        # How to distinguish? `stepper.live_mode` might be set AFTER we consume history.
-        # But `stepper.step()` returns bars from the DF first.
-        # Simple check: Is this bar's timestamp in our initial history batch?
-        # A crude but effective way is just to check `stepper.live_mode`.
-        # However, `YFinanceStepper` might not set `live_mode=True` until it exhausts history.
-        
-        # Logic:
-        # If we are in history (not live_mode), do NOT emit BAR (frontend has it).
-        # We STILL run strategy to track state/trades.
-        # If we are live (live_mode=True), we EMIT BAR.
-        
         if stepper.live_mode:
             emit('BAR', {
                 'bar_idx': step.bar_idx,
@@ -239,38 +216,45 @@ def main():
                 'triggered': True
             })
             
-            # Build base order from signal
-            if 'entry_price' in signal and 'stop_price' in signal and 'tp_price' in signal:
-                # Signal provides full bracket (IFVG)
-                base_order = EntryOrder(
-                    direction=signal['direction'],
-                    entry_price=signal['entry_price'],
-                    stop_price=signal['stop_price'],
-                    tp_price=signal['tp_price']
-                )
-            else:
-                # Start with market entry, will be modified by entry scans
-                base_order = EntryOrder(
-                    direction=signal['direction'],
-                    entry_price=float(bar['close']),
-                    stop_price=float(bar['close']),  # Will be recalculated
-                    tp_price=float(bar['close'])     # Will be recalculated
-                )
+            # Use OCOEngine to create bracket
+            # If signal provides explicit prices (IFVG), favor those?
+            # Or use dynamic entry parameters if override not set?
             
-            # Apply entry scans to modify the order
-            current_bar = pd.Series({
-                'open': bar['open'], 'high': bar['high'], 
-                'low': bar['low'], 'close': bar['close']
-            })
-            final_order = apply_entry_scans(base_order, history, entry_config, current_bar)
+            # For this modular update, we prioritize the USER SELECTED entry strategy
+            # UNLESS the signal is "High Precision" (like IFVG providing exact levels).
+            # But the user specifically asked for modular entry tools.
+            # So we will use the OCO Engine's calculation.
+            
+            # Construct OCO Config
+            config = OCOConfig(
+                direction=signal['direction'],
+                entry_type=args.entry_type.upper(), # 'MARKET', 'LIMIT', 'RETRACE_SIGNAL'
+                entry_params=entry_params,
+                stop_atr=args.stop_atr,
+                tp_multiple=args.tp_r,
+                entry_offset_atr=0.0 # Legacy
+            )
+            
+            # Create Bracket (Calculates prices)
+            atr_series = calculate_atr(history, 14)
+            atr = float(atr_series.iloc[-1]) if len(atr_series) > 0 else 5.0
+            
+            bracket = oco_engine.create_bracket(
+                config=config,
+                base_price=float(bar['close']),
+                atr=atr,
+                df_1m=history, # Pass history as 1m context
+                df_htf=history, # Pass history as htf (simplification for now)
+                current_idx=len(history)-1
+            )
             
             emit('OCO_OPEN', {
                 'decision_id': f'live_{decision_count:04d}',
-                'direction': final_order.direction,
-                'entry_price': round(final_order.entry_price, 2),
-                'stop_price': round(final_order.stop_price, 2),
-                'tp_price': round(final_order.tp_price, 2),
-                'entry_type': final_order.entry_type
+                'direction': bracket.config.direction,
+                'entry_price': round(bracket.entry_price, 2),
+                'stop_price': round(bracket.stop_price, 2),
+                'tp_price': round(bracket.tp_price, 2),
+                'entry_type': bracket.config.entry_type
             })
             
         # No artificial delay needed in history since we sent batch

@@ -77,11 +77,17 @@ const aggregateData = (bars: BarData[], intervalMinutes: number): BarData[] => {
     return aggregated;
 };
 
-// Parse ISO time string to Unix timestamp forcing component display
-// This treats the HR:MIN:SEC in the string as if it were UTC to force display
+// Parse ISO time string to Unix timestamp
 const parseTime = (timeStr: string): number => {
     if (!timeStr) return 0;
-    // Match YYYY-MM-DD (T or space) HH:MM:SS
+
+    // If it contains a timezone offset or Z, let the browser parse it
+    if (timeStr.match(/([+-]\d{2}:?\d{2}|Z)$/)) {
+        const ts = Date.parse(timeStr);
+        if (!isNaN(ts)) return Math.floor(ts / 1000);
+    }
+
+    // Naive fallback (treats string as UTC components if no timezone info)
     const m = timeStr.match(/(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2}):(\d{2})/);
     if (!m) return Math.floor(new Date(timeStr).getTime() / 1000);
 

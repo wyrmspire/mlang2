@@ -6,7 +6,7 @@ interface Message {
     content: string;
     type?: 'text' | 'table' | 'chart' | 'code';
     data?: any;
-    run_id?: string;  // Add run_id to message
+    run_id?: string;
 }
 
 interface LabResult {
@@ -52,20 +52,15 @@ export const LabPage: React.FC<LabPageProps> = ({ onLoadRun }) => {
         setLoading(true);
 
         try {
-            // Call the lab agent endpoint
             const response = await api.postLabAgent([...messages, userMsg]);
-
-            // Add assistant response
             const assistantMsg: Message = {
                 role: 'assistant',
                 content: response.reply || 'Processing...',
                 type: response.type || 'text',
                 data: response.data,
-                run_id: response.run_id  // Capture run_id from response
+                run_id: response.run_id
             };
             setMessages(prev => [...prev, assistantMsg]);
-
-            // If there's a result, store it
             if (response.result) {
                 setCurrentResult(response.result);
             }
@@ -80,7 +75,6 @@ export const LabPage: React.FC<LabPageProps> = ({ onLoadRun }) => {
         }
     };
 
-    // Quick action buttons
     const quickActions = [
         { label: 'Run EMA Scan', prompt: 'Run an EMA cross scan on the last 7 days' },
         { label: 'Test ORB Strategy', prompt: 'Test the Opening Range Breakout strategy' },
@@ -93,7 +87,6 @@ export const LabPage: React.FC<LabPageProps> = ({ onLoadRun }) => {
         setInput(prompt);
     };
 
-    // Render a result table
     const renderResultTable = (result: LabResult, runId?: string) => (
         <div className="bg-slate-800 rounded-lg p-4 my-3 border border-slate-600">
             <div className="flex items-center justify-between mb-3">
@@ -126,17 +119,10 @@ export const LabPage: React.FC<LabPageProps> = ({ onLoadRun }) => {
                 </div>
             </div>
 
-            {/* Win/Loss Bar */}
             <div className="mt-4">
                 <div className="flex h-3 rounded overflow-hidden">
-                    <div
-                        className="bg-green-500"
-                        style={{ width: `${result.win_rate * 100}%` }}
-                    />
-                    <div
-                        className="bg-red-500"
-                        style={{ width: `${(1 - result.win_rate) * 100}%` }}
-                    />
+                    <div className="bg-green-500" style={{ width: `${result.win_rate * 100}%` }} />
+                    <div className="bg-red-500" style={{ width: `${(1 - result.win_rate) * 100}%` }} />
                 </div>
                 <div className="flex justify-between text-xs text-slate-400 mt-1">
                     <span>{result.wins} Wins</span>
@@ -144,7 +130,6 @@ export const LabPage: React.FC<LabPageProps> = ({ onLoadRun }) => {
                 </div>
             </div>
 
-            {/* Mini Equity Curve */}
             {result.equity_curve && result.equity_curve.length > 0 && (
                 <div className="mt-4">
                     <div className="text-xs text-slate-400 mb-2">Equity Curve</div>
@@ -167,7 +152,6 @@ export const LabPage: React.FC<LabPageProps> = ({ onLoadRun }) => {
         </div>
     );
 
-    // Render message based on type
     const renderMessage = (msg: Message, idx: number) => {
         if (msg.role === 'user') {
             return (
@@ -183,7 +167,6 @@ export const LabPage: React.FC<LabPageProps> = ({ onLoadRun }) => {
             <div key={idx} className="flex justify-start">
                 <div className="max-w-[90%]">
                     <div className="bg-slate-700 text-slate-100 rounded-xl px-4 py-3">
-                        {/* Render markdown-like content */}
                         {msg.content.split('\n').map((line, i) => {
                             if (line.startsWith('##')) {
                                 return <h3 key={i} className="font-bold text-lg text-blue-400 mt-2">{line.replace('##', '').trim()}</h3>;
@@ -195,7 +178,6 @@ export const LabPage: React.FC<LabPageProps> = ({ onLoadRun }) => {
                                 return <p key={i} className="text-slate-300 ml-3">• {line.substring(2)}</p>;
                             }
                             if (line.startsWith('|')) {
-                                // Simple table row
                                 return (
                                     <div key={i} className="font-mono text-xs text-slate-300 bg-slate-800 px-2 py-1">
                                         {line}
@@ -205,8 +187,6 @@ export const LabPage: React.FC<LabPageProps> = ({ onLoadRun }) => {
                             return <p key={i} className="text-slate-200">{line}</p>;
                         })}
                     </div>
-
-                    {/* Render result if attached */}
                     {msg.data?.result && renderResultTable(msg.data.result, msg.run_id)}
                 </div>
             </div>
@@ -214,9 +194,9 @@ export const LabPage: React.FC<LabPageProps> = ({ onLoadRun }) => {
     };
 
     return (
-        <div className="flex flex-col h-screen bg-slate-900">
+        <div className="flex flex-col h-full bg-slate-900 overflow-hidden">
             {/* Header */}
-            <div className="h-14 flex items-center justify-between px-6 border-b border-slate-700 bg-slate-800">
+            <div className="h-14 flex items-center justify-between px-6 border-b border-slate-700 bg-slate-800 shrink-0">
                 <div className="flex items-center gap-3">
                     <span className="text-2xl">🔬</span>
                     <h1 className="text-xl font-bold text-white">Research Lab</h1>
@@ -227,9 +207,48 @@ export const LabPage: React.FC<LabPageProps> = ({ onLoadRun }) => {
             </div>
 
             {/* Main Content */}
-            <div className="flex flex-1 overflow-hidden">
-                {/* Chat Area */}
-                <div className="flex-1 flex flex-col">
+            <div className="flex flex-1 overflow-hidden min-h-0">
+
+                {/* Left Sidebar - Current Result & Commands */}
+                <div className="w-80 border-r border-slate-700 bg-slate-800 p-4 overflow-y-auto shrink-0 flex flex-col">
+                    <h2 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4">
+                        Latest Result
+                    </h2>
+
+                    {currentResult ? (
+                        renderResultTable(currentResult)
+                    ) : (
+                        <div className="text-slate-500 text-sm text-center py-8 border border-dashed border-slate-700 rounded">
+                            Run a strategy to see results here
+                        </div>
+                    )}
+
+                    <div className="mt-6">
+                        <h2 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-3">
+                            Quick Commands
+                        </h2>
+                        <div className="space-y-2 text-xs">
+                            <div className="bg-slate-700 p-2 rounded text-slate-300 cursor-pointer hover:bg-slate-600 transition" onClick={() => setInput("Run EMA cross scan")}>
+                                <code>"Run EMA cross scan"</code>
+                            </div>
+                            <div className="bg-slate-700 p-2 rounded text-slate-300 cursor-pointer hover:bg-slate-600 transition" onClick={() => setInput("Test lunch hour fade")}>
+                                <code>"Test lunch hour fade"</code>
+                            </div>
+                            <div className="bg-slate-700 p-2 rounded text-slate-300 cursor-pointer hover:bg-slate-600 transition" onClick={() => setInput("Train LSTM on bounce data")}>
+                                <code>"Train LSTM on bounce data"</code>
+                            </div>
+                            <div className="bg-slate-700 p-2 rounded text-slate-300 cursor-pointer hover:bg-slate-600 transition" onClick={() => setInput("Compare ORB vs MR strategy")}>
+                                <code>"Compare ORB vs MR strategy"</code>
+                            </div>
+                            <div className="bg-slate-700 p-2 rounded text-slate-300 cursor-pointer hover:bg-slate-600 transition" onClick={() => setInput("Show experiment history")}>
+                                <code>"Show experiment history"</code>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                {/* Chat Area (Right) */}
+                <div className="flex-1 flex flex-col min-w-0 bg-slate-900">
                     {/* Messages */}
                     <div className="flex-1 overflow-y-auto p-6 space-y-4" ref={scrollRef}>
                         {messages.map((msg, idx) => renderMessage(msg, idx))}
@@ -243,7 +262,7 @@ export const LabPage: React.FC<LabPageProps> = ({ onLoadRun }) => {
                     </div>
 
                     {/* Quick Actions */}
-                    <div className="px-6 py-3 border-t border-slate-700 bg-slate-800">
+                    <div className="px-6 py-3 border-t border-slate-700 bg-slate-800 shrink-0">
                         <div className="flex gap-2 flex-wrap">
                             {quickActions.map((action, idx) => (
                                 <button
@@ -258,7 +277,7 @@ export const LabPage: React.FC<LabPageProps> = ({ onLoadRun }) => {
                     </div>
 
                     {/* Input */}
-                    <form onSubmit={handleSubmit} className="p-4 border-t border-slate-700 bg-slate-800">
+                    <form onSubmit={handleSubmit} className="p-4 border-t border-slate-700 bg-slate-800 shrink-0">
                         <div className="flex gap-3">
                             <input
                                 value={input}
@@ -275,45 +294,6 @@ export const LabPage: React.FC<LabPageProps> = ({ onLoadRun }) => {
                             </button>
                         </div>
                     </form>
-                </div>
-
-                {/* Right Sidebar - Current Result */}
-                <div className="w-80 border-l border-slate-700 bg-slate-800 p-4 overflow-y-auto">
-                    <h2 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4">
-                        Latest Result
-                    </h2>
-
-                    {currentResult ? (
-                        renderResultTable(currentResult)
-                    ) : (
-                        <div className="text-slate-500 text-sm text-center py-8">
-                            Run a strategy to see results here
-                        </div>
-                    )}
-
-                    {/* Experiment History */}
-                    <div className="mt-6">
-                        <h2 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-3">
-                            Quick Commands
-                        </h2>
-                        <div className="space-y-2 text-xs">
-                            <div className="bg-slate-700 p-2 rounded text-slate-300">
-                                <code>"Run EMA cross scan"</code>
-                            </div>
-                            <div className="bg-slate-700 p-2 rounded text-slate-300">
-                                <code>"Test lunch hour fade"</code>
-                            </div>
-                            <div className="bg-slate-700 p-2 rounded text-slate-300">
-                                <code>"Train LSTM on bounce data"</code>
-                            </div>
-                            <div className="bg-slate-700 p-2 rounded text-slate-300">
-                                <code>"Compare ORB vs MR strategy"</code>
-                            </div>
-                            <div className="bg-slate-700 p-2 rounded text-slate-300">
-                                <code>"Show experiment history"</code>
-                            </div>
-                        </div>
-                    </div>
                 </div>
             </div>
         </div>

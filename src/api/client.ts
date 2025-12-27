@@ -75,6 +75,15 @@ export const api = {
         return response.json();
     },
 
+    clearAllRuns: async (): Promise<void> => {
+        const hasBackend = await checkBackend();
+        if (!hasBackend) {
+            throw new Error('Backend unavailable. Start with: ./start.sh');
+        }
+        const response = await fetch(`${API_BASE}/experiments/clear`, { method: 'DELETE' });
+        if (!response.ok) throw new Error('Failed to clear runs');
+    },
+
     getRun: async (runId: string): Promise<any> => {
         const hasBackend = await checkBackend();
         if (!hasBackend) {
@@ -197,8 +206,10 @@ export const api = {
         days: number = 7,
         speed: number = 10.0,
         entryConfig?: {
-            entry_type?: 'market' | 'limit';
+            entry_type?: string;     // Now string to support all strategies
+            entry_params?: any;      // Dynamic params for strategies
             stop_method?: 'atr' | 'swing' | 'fixed_bars';
+            stop_config?: any;       // Future-proofing
             tp_method?: 'atr' | 'r_multiple';
             stop_atr?: number;
             tp_atr?: number;
@@ -213,8 +224,9 @@ export const api = {
             strategy,
             days,
             speed,
-            // Entry scan config (defaults handled by backend)
+            // Entry scan config
             entry_type: entryConfig?.entry_type || 'market',
+            entry_params: entryConfig?.entry_params || {},
             stop_method: entryConfig?.stop_method || 'atr',
             tp_method: entryConfig?.tp_method || 'atr',
             stop_atr: entryConfig?.stop_atr || 1.0,

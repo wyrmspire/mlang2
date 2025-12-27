@@ -267,78 +267,142 @@ export const LiveSessionView: React.FC<LiveSessionViewProps> = ({
     };
 
     const goLive = async () => {
-        // Load fresh YFinance data before starting live mode
-        setStatus('Loading YFinance data...');
-        const success = await fetchYFinanceHistory();
-        if (!success) return; // fetchYFinanceHistory already set status on failure
+        // Collect params from UI
+        const pctInput = document.getElementById('param_pct') as HTMLInputElement;
+        const tfInput = document.getElementById('param_tf') as HTMLSelectElement;
 
-        // Reset start index for playback slicing
-        setStartIndex(0);
+        const entryParams: any = {};
+        if (pctInput) entryParams.pct = parseFloat(pctInput.value);
+        if (tfInput) entryParams.timeframe = tfInput.value;
 
-        // Clean up any existing intervals
-        if (intervalRef.current) {
-            clearInterval(intervalRef.current);
-            intervalRef.current = null;
+        try {
+            setStatus('Initializing Backend Session...');
+            const config = {
+                entry_type: entryType,
+                entry_params: entryParams,
+                stop_method: stopMethod,
+                tp_method: tpMethod,
+                stop_atr: stopAtr,
+                tp_atr: tpAtr
+            };
+
+            const res = await api.startLiveReplay(
+                ticker,
+                selectedScanner, // Use scanner as strategy
+                yfinanceDays,
+                speed,
+                config
+            );
+
+            if (res.session_id) {
+                setStatus(`Session Started: ${res.session_id}. Connecting stream...`);
+                setupEventSource(res.session_id);
+            }
+        } catch (e: any) {
+            console.error(e);
+            setStatus(`Failed to start live session: ${e.message}`);
         }
-        if (pollIntervalRef.current) {
-            clearInterval(pollIntervalRef.current);
-            pollIntervalRef.current = null;
+    };
+
+    const setupEventSource = (sessionId: string) => {
+        if (eventSourceRef.current) {
+            eventSourceRef.current.close();
         }
 
-        // Show all loaded bars and jump to the latest
-        setBars([...allBarsRef.current]);
-        const lastIdx = allBarsRef.current.length - 1;
-        setCurrentIndex(lastIdx);
+        const url = api.getReplayStreamUrl(sessionId);
+        const eventSource = new EventSource(url);
+        eventSourceRef.current = eventSource;
+
         setIsLiveStreaming(true);
         setPlaybackState('PLAYING');
-        const lastBar = allBarsRef.current[lastIdx];
-        const lastTime = new Date(lastBar.time * 1000).toLocaleTimeString();
-        setStatus(`Live Mode: ${allBarsRef.current.length} bars loaded (last: ${lastTime}). Polling for updates...`);
 
-        // Run CNN on existing bars (background)
-        let processIdx = 60;
-        const cnnInterval = setInterval(() => {
-            if (processIdx >= allBarsRef.current.length) {
-                clearInterval(cnnInterval);
-                return;
-            }
-            processBar(allBarsRef.current[processIdx], processIdx);
-            processIdx++;
-        }, 10);
-
-        // Start polling for new bars every 30 seconds
-        console.log('[Go Live] Starting 30‑second poll');
-        pollIntervalRef.current = setInterval(async () => {
+        eventSource.onmessage = (event) => {
             try {
-                const data = await api.getYFinanceData(ticker, 1);
-                if (data.bars && data.bars.length > 0) {
-                    const latestBar = data.bars[data.bars.length - 1];
-                    const latestTime = new Date(latestBar.time).getTime() / 1000;
-                    const ourLatestTime = allBarsRef.current[allBarsRef.current.length - 1].time;
-                    if (latestTime > ourLatestTime) {
-                        const newBar: BarData = {
-                            time: latestTime,
-                            open: latestBar.open,
-                            high: latestBar.high,
-                            low: latestBar.low,
-                            close: latestBar.close,
-                            volume: latestBar.volume || 0
-                        };
-                        console.log('[Poll] New bar found:', new Date(latestTime * 1000).toLocaleTimeString());
-                        allBarsRef.current.push(newBar);
-                        setBars(prev => [...prev, newBar]);
-                        setCurrentIndex(prev => prev + 1);
-                        processBar(newBar, allBarsRef.current.length - 1);
-                        setStatus(`New Bar: ${new Date(latestTime * 1000).toLocaleTimeString()}. Total: ${allBarsRef.current.length}`);
-                    } else {
-                        const nextExpected = new Date((ourLatestTime + 60) * 1000).toLocaleTimeString();
-                        setStatus(`Synced. Waiting for next candle (~${nextExpected})`);
-                    }
+                const data = JSON.parse(event.data);
+
+                if (data.type === 'BAR') {
+                    // Update latest bar
+                    const newBar: BarData = {
+                        time: new Date(data.timestamp).getTime() / 1000,
+                        open: data.data.open,
+                        high: data.data.high,
+                        low: data.data.low,
+                        close: data.data.close,
+                        volume: data.data.volume
+                    };
+
+                    // Append or update if timestamp matches last
+                    setBars(prev => {
+                        const last = prev[prev.length - 1];
+                        if (last && last.time === newBar.time) {
+                            // Update existing (unlikely in this stream but possible)
+                            const updated = [...prev];
+                            updated[updated.length - 1] = newBar;
+                            allBarsRef.current = updated;
+                            return updated;
+                        } else {
+                            // Append
+                            const updated = [...prev, newBar];
+                            allBarsRef.current = updated;
+                            return updated;
+                        }
+                    });
+                    setCurrentIndex(prev => prev + 1); // Auto scroll?
+                    setStatus(`Live: ${new Date(newBar.time * 1000).toLocaleTimeString()}`);
+                }
+                else if (data.type === 'DECISION') {
+                    // Backend triggered a pattern
+                    // We can visualize this?
+                    // For now, key is ORDER_SUBMIT usually follows
+                }
+                else if (data.type === 'ORDER_SUBMIT') {
+                    const ocoData = data.data;
+                    const newOco = {
+                        entry: ocoData.entry_price,
+                        stop: ocoData.stop_price,
+                        tp: ocoData.tp_price,
+                        startTime: new Date(data.timestamp).getTime() / 1000,
+                        direction: ocoData.direction
+                    };
+                    ocoRef.current = newOco;
+                    setOcoState(newOco);
+                    setTriggers(prev => prev + 1);
+                }
+                else if (data.type === 'FILL') {
+                    // Trade completed
+                    // We construct VizTrade from event data or wait for full update?
+                    // Simpler: Backend manages state, we just visualize active OCO closure
+                    // OCOEngine (Py) emits outcome.
+                    // But here we just clear the OCO box for now, 
+                    // ideally we get the trade result from the backend event.
+
+                    // For now, client logic clears OCO if it sees price hit levels? No, backend tells us.
+                    ocoRef.current = null;
+                    setOcoState(null);
+
+                    // Note: Ideally we parse PnL from FILL event to update stats
+                    const pnl = data.data.pnl_dollars || 0;
+                    if (pnl > 0) setWins(prev => prev + 1);
+                    else setLosses(prev => prev + 1);
+                }
+                else if (data.type === 'STREAM_END') {
+                    eventSource.close();
+                    setPlaybackState('STOPPED');
+                    setStatus('Session Ends.');
+                    setIsLiveStreaming(false);
                 }
             } catch (e) {
-                console.error('[Poll] Error:', e);
+                console.error('SSE Parse Error', e);
             }
-        }, 30000);
+        };
+
+        eventSource.onerror = (e) => {
+            console.error('SSE Error', e);
+            eventSource.close();
+            setIsLiveStreaming(false);
+            setPlaybackState('STOPPED');
+            setStatus('Connection connection lost.');
+        };
     };
 
     // UI button for manual candle fetch (place near other controls)
@@ -966,31 +1030,50 @@ export const LiveSessionView: React.FC<LiveSessionViewProps> = ({
                     {/* Entry Configuration */}
                     <SidebarSection title="Entry Configuration" colorClass="text-purple-400">
                         <div className="mb-3">
-                            <label className="text-xs text-slate-400 mb-1 block">Entry Type</label>
-                            <div className="flex gap-3">
-                                <label className="flex items-center gap-1 text-xs text-slate-300 cursor-pointer">
+                            <label className="text-xs text-slate-400 mb-1 block">Entry Strategy</label>
+                            <select
+                                value={entryType}
+                                onChange={e => setEntryType(e.target.value as any)}
+                                disabled={playbackState === 'PLAYING'}
+                                className="w-full bg-slate-900 border border-slate-600 rounded px-2 py-1 text-sm text-white mb-2"
+                            >
+                                <option value="market">Market</option>
+                                <option value="limit">Limit (Legacy)</option>
+                                <option value="retrace_signal">Retrace (Signal Bar)</option>
+                                <option value="retrace_timeframe">Retrace (Timeframe)</option>
+                                <option value="breakout">Breakout</option>
+                            </select>
+
+                            {/* Dynamic Params based on strategy */}
+                            {(entryType === 'retrace_signal' || entryType === 'retrace_timeframe') && (
+                                <div className="mb-2 pl-2 border-l-2 border-slate-700">
+                                    <label className="text-xs text-slate-500 mb-1 block">Retrace % (0.0 - 1.0)</label>
                                     <input
-                                        type="radio"
-                                        name="entryType"
-                                        value="market"
-                                        checked={entryType === 'market'}
-                                        onChange={() => setEntryType('market')}
-                                        disabled={playbackState === 'PLAYING'}
+                                        type="number"
+                                        step="0.1"
+                                        min="0.1"
+                                        max="1.0"
+                                        defaultValue="0.5"
+                                        id="param_pct"
+                                        className="w-full bg-slate-800 border border-slate-600 rounded px-2 py-1 text-xs text-white"
                                     />
-                                    Market
-                                </label>
-                                <label className="flex items-center gap-1 text-xs text-slate-300 cursor-pointer">
-                                    <input
-                                        type="radio"
-                                        name="entryType"
-                                        value="limit"
-                                        checked={entryType === 'limit'}
-                                        onChange={() => setEntryType('limit')}
-                                        disabled={playbackState === 'PLAYING'}
-                                    />
-                                    Limit
-                                </label>
-                            </div>
+                                </div>
+                            )}
+
+                            {entryType === 'retrace_timeframe' && (
+                                <div className="mb-2 pl-2 border-l-2 border-slate-700">
+                                    <label className="text-xs text-slate-500 mb-1 block">Timeframe</label>
+                                    <select
+                                        id="param_tf"
+                                        defaultValue="15m"
+                                        className="w-full bg-slate-800 border border-slate-600 rounded px-2 py-1 text-xs text-white"
+                                    >
+                                        <option value="5m">5m</option>
+                                        <option value="15m">15m</option>
+                                        <option value="1h">1h</option>
+                                    </select>
+                                </div>
+                            )}
                         </div>
 
                         <div className="flex gap-2 mb-2">

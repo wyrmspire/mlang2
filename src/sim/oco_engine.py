@@ -59,8 +59,9 @@ class OCOConfig:
     direction: str = "LONG"         # 'LONG' or 'SHORT'
     
     # Entry
-    entry_type: str = "LIMIT"       # 'MARKET', 'LIMIT'
-    entry_offset_atr: float = 0.25  # ATR multiplier for limit offset
+    entry_type: str = "LIMIT"       # 'MARKET', 'LIMIT', 'RETRACE', etc.
+    entry_params: Dict[str, Any] = field(default_factory=dict)  # Params for entry strategy
+    entry_offset_atr: float = 0.25  # Legacy support (maps to limit_offset params)
     
     # Stop configuration
     stop_config: Optional[StopConfig] = None  # Use smart stops if provided
@@ -82,6 +83,7 @@ class OCOConfig:
         return {
             'direction': self.direction,
             'entry_type': self.entry_type,
+            'entry_params': self.entry_params,
             'entry_offset_atr': self.entry_offset_atr,
             'stop_atr': self.stop_atr if self.stop_config is None else None,
             'stop_config': self.stop_config.to_dict() if self.stop_config else None,
@@ -202,20 +204,34 @@ class OCOEngine:
         Returns:
             OCOBracket with rounded prices
         """
+        from src.sim.entry_strategies import EntryRegistry
+
         # Use override direction if provided, else use config
         direction = direction_override or config.direction
-        # Calculate entry price
-        if config.entry_type == 'MARKET':
-            entry_price = base_price
-        else:  # LIMIT
-            if direction == 'LONG':
-                entry_price = self.costs.round_to_tick(
-                    base_price - config.entry_offset_atr * atr, 'down'
-                )
-            else:
-                entry_price = self.costs.round_to_tick(
-                    base_price + config.entry_offset_atr * atr, 'up'
-                )
+        
+        # Prepare context for entry strategy
+        entry_context = {
+            '5m': None, # TODO: Pass these in more reliably
+            '15m': df_htf if df_htf is not None else None, # Assuming htf is the needed one for now
+            'vwap': None # TODO: Pass in
+        }
+        
+        # Helper params merge (legacy support)
+        entry_params = config.entry_params.copy()
+        if 'offset_atr' not in entry_params:
+            entry_params['offset_atr'] = config.entry_offset_atr
+            
+        # Calculate entry price using strategy
+        strategy = EntryRegistry.get(config.entry_type.lower())
+        entry_price = strategy.calculate_entry(
+            base_price=base_price,
+            direction=direction,
+            bar=df_1m.iloc[current_idx] if df_1m is not None else pd.Series({'high': base_price, 'low': base_price, 'close': base_price}), 
+            atr=atr,
+            params=entry_params,
+            costs=self.costs,
+            context=entry_context
+        )
         
         # Calculate stop price
         if config.stop_config is not None:

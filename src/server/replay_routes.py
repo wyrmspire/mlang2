@@ -45,6 +45,7 @@ class LiveReplayRequest(BaseModel):
     
     # Entry scan configuration
     entry_type: str = "market"      # 'market' or 'limit'
+    entry_params: Dict[str, Any] = {} # Dynamic params
     stop_method: str = "atr"        # 'atr', 'swing', 'fixed_bars'
     tp_method: str = "atr"          # 'atr', 'r_multiple'
     stop_atr: float = 1.0
@@ -66,6 +67,7 @@ async def start_live_replay(request: LiveReplayRequest) -> Dict[str, Any]:
         "--days", str(request.days),
         "--speed", str(request.speed),
         "--entry-type", request.entry_type,
+        "--entry-params", json.dumps(request.entry_params),
         "--stop-method", request.stop_method,
         "--tp-method", request.tp_method,
         "--stop-atr", str(request.stop_atr),

@@ -12,23 +12,20 @@ from .indicator_triggers import EMACrossTrigger, RSIThresholdTrigger
 from .structure_break import StructureBreakTrigger
 from .fakeout import FakeoutTrigger
 from .ema_rejection import EMA200RejectionTrigger
-from .parametric import RejectionTrigger, ComparisonTrigger
+from .parametric import ComparisonTrigger # Removed RejectionTrigger to use new one
+from .price_action_triggers import (
+    RejectionTrigger, 
+    PinBarTrigger, 
+    EngulfingTrigger, 
+    InsideBarTrigger, 
+    DoubleTopBottomTrigger, 
+    FlagPatternTrigger
+)
 from .sweep import SweepTrigger
 from .or_false_break import ORFalseBreakTrigger
 from .vwap_reclaim import VWAPReclaimTrigger
-# Logic triggers imported safely or lazily if needed
-# To avoid cycle, we'll import logic classes inside the factory/registry if they depend on this factory
-# But AndTrigger needs trigger_from_dict...
 
-# Solution:
-# 1. Define Registry here (empty or populated with leaves)
-# 2. Logic triggers import trigger_from_dict
-# 3. We import Logic triggers here to populate registry
-
-# Wait, if logic.py imports trigger_from_dict, then trigger_from_dict cannot import logic.py at top level
-# unless we use lazy import inside the function.
-
-TRIGGER_REGISTRY = {}
+# ...
 
 def register_triggers():
     """Populate registry. Call this once or ensure imports happen."""
@@ -40,7 +37,15 @@ def register_triggers():
     TRIGGER_REGISTRY["structure_break"] = StructureBreakTrigger
     TRIGGER_REGISTRY["fakeout"] = FakeoutTrigger
     TRIGGER_REGISTRY["ema200_rejection"] = EMA200RejectionTrigger
+    
+    # New Price Action Triggers
     TRIGGER_REGISTRY["rejection"] = RejectionTrigger
+    TRIGGER_REGISTRY["pin_bar"] = PinBarTrigger
+    TRIGGER_REGISTRY["engulfing"] = EngulfingTrigger
+    TRIGGER_REGISTRY["inside_bar"] = InsideBarTrigger
+    TRIGGER_REGISTRY["double_top_bottom"] = DoubleTopBottomTrigger
+    TRIGGER_REGISTRY["flag_pattern"] = FlagPatternTrigger
+    
     TRIGGER_REGISTRY["comparison"] = ComparisonTrigger
     TRIGGER_REGISTRY["sweep"] = SweepTrigger
     TRIGGER_REGISTRY["or_false_break"] = ORFalseBreakTrigger
