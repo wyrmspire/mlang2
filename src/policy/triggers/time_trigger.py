@@ -28,16 +28,24 @@ class TimeTrigger(Trigger):
         hour: Optional[int] = None,
         minute: int = 0,
         hours: Optional[List[int]] = None,
+        time: Optional[str] = None,  # Accept "HH:MM" format from agent
         direction: str = "NEUTRAL",
         timezone: str = "America/New_York",
     ):
+        # Support 'time' parameter as string (e.g., "10:00", "11:30")
+        if time is not None and hour is None:
+            parts = str(time).split(":")
+            hour = int(parts[0])
+            if len(parts) > 1:
+                minute = int(parts[1])
+        
         # Support single hour or multiple hours
         if hours is not None:
             self._hours = hours
         elif hour is not None:
             self._hours = [hour]
         else:
-            raise ValueError("Must specify 'hour' or 'hours'")
+            raise ValueError("Must specify 'hour', 'hours', or 'time'")
         
         self._minute = minute
         self._direction = TriggerDirection[direction.upper()]

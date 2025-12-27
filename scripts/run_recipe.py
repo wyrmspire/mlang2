@@ -132,7 +132,7 @@ def main():
             experiment_config=config.to_dict()
         )
     else:
-        print("💡 Light Mode enabled: Skipping visualization export")
+        print("Light Mode enabled: Skipping visualization export")
     
     # 5. Monkey Patch get_scanner
     import src.policy.scanners
