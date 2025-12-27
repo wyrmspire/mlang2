@@ -6,6 +6,7 @@ Wraps src.data.loader for the Agent.
 
 from typing import Dict, Any, List, Optional
 import pandas as pd
+import numpy as np
 from zoneinfo import ZoneInfo
 from datetime import datetime, timedelta
 
@@ -233,3 +234,65 @@ class GetMarketRegimeTool:
             "regime": regime,
             "return_pct": float(ret * 100)  # Convert to percentage
         }
+@ToolRegistry.register(
+    tool_id="get_time_of_day_stats",
+    category=ToolCategory.UTILITY,
+    name="Get Time-of-Day Stats",
+    description="Analyze volatility and price action average by hour of the day",
+    input_schema={
+        "type": "object",
+        "properties": {
+            "lookback_days": {
+                "type": "integer",
+                "description": "Number of days to analyze (default: 30)",
+                "default": 30
+            }
+        }
+    },
+    output_schema={
+        "type": "object",
+        "properties": {
+            "hourly_stats": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "hour": {"type": "integer"},
+                        "avg_range": {"type": "number"},
+                        "avg_volume": {"type": "number"},
+                        "volatility": {"type": "number"}
+                    }
+                }
+            }
+        }
+    }
+)
+class GetTimeOfDayStatsTool:
+    def execute(self, lookback_days: int = 30, **kwargs) -> Dict[str, Any]:
+        """Analyze average stats by hour."""
+        from src.data.loader import load_continuous_contract
+        df = load_continuous_contract()
+        
+        # Filter last N days
+        cutoff = df['time'].iloc[-1] - timedelta(days=lookback_days)
+        df = df[df['time'] >= cutoff].copy()
+        
+        df['hour'] = df['time'].dt.hour
+        df['range'] = df['high'] - df['low']
+        
+        stats = df.groupby('hour').agg({
+            'range': 'mean',
+            'volume': 'mean',
+            'close': 'std' # Simple volatility proxy
+        }).reset_index()
+        
+        hourly_stats = []
+        for _, row in stats.iterrows():
+            hourly_stats.append({
+                "hour": int(row['hour']),
+                "avg_range": round(float(row['range']), 2),
+                "avg_volume": round(float(row['volume']), 0),
+                "volatility": round(float(row['close']), 2)
+            })
+            
+        return {"hourly_stats": hourly_stats}

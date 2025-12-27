@@ -130,6 +130,11 @@ class RunStrategyTool:
             "run_name": {
                 "type": "string",
                 "description": "Optional custom name for the run"
+            },
+            "silent": {
+                "type": "boolean",
+                "description": "If true, run silently without forcing visualization UI (default: false)",
+                "default": false
             }
         },
         "required": ["trigger_type", "bracket_type", "start_date", "weeks"]
@@ -338,3 +343,157 @@ class QueryExperimentsTool:
             "sort_by": inputs.get("sort_by"),
             "results": []  # Populated by server
         }
+@ToolRegistry.register(
+    tool_id="compare_runs",
+    category=ToolCategory.UTILITY,
+    name="Compare Runs",
+    description="Compare results of two or more runs side-by-side",
+    input_schema={
+        "type": "object",
+        "properties": {
+            "run_ids": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "List of run IDs to compare"
+            }
+        },
+        "required": ["run_ids"]
+    }
+)
+class CompareRunsTool:
+    def execute(self, **inputs) -> Dict[str, Any]:
+        """Compare runs - handled by server."""
+        return {"status": "success", "run_ids": inputs.get("run_ids")}
+
+
+@ToolRegistry.register(
+    tool_id="get_run_config",
+    category=ToolCategory.UTILITY,
+    name="Get Run Config",
+    description="Get the configuration/recipe used for a specific run",
+    input_schema={
+        "type": "object",
+        "properties": {
+            "run_id": {
+                "type": "string",
+                "description": "The run ID to inspect"
+            }
+        },
+        "required": ["run_id"]
+    }
+)
+class GetRunConfigTool:
+    def execute(self, **inputs) -> Dict[str, Any]:
+        """Get run config - handled by server."""
+        return {"status": "success", "run_id": inputs.get("run_id")}
+
+
+@ToolRegistry.register(
+    tool_id="create_variation",
+    category=ToolCategory.STRATEGY,
+    name="Create Variation",
+    description="Create a new run by modifying an existing run's configuration",
+    input_schema={
+        "type": "object",
+        "properties": {
+            "base_run_id": {
+                "type": "string",
+                "description": "The run ID to use as a base"
+            },
+            "modifications": {
+                "type": "object",
+                "description": "Changes to apply to the base config (e.g., {'tp_atr': 4.0})"
+            },
+            "run_name": {
+                "type": "string",
+                "description": "Optional custom name for the new run"
+            }
+        },
+        "required": ["base_run_id", "modifications"]
+    }
+)
+class CreateVariationTool:
+    def execute(self, **inputs) -> Dict[str, Any]:
+        """Create variation - handled by server."""
+        return {"status": "queued", "base_run_id": inputs.get("base_run_id")}
+
+
+@ToolRegistry.register(
+    tool_id="save_to_tradeviz",
+    category=ToolCategory.UTILITY,
+    name="Save to Trade Viz",
+    description="Move a successful experiment from the Lab to the main Trade Viz view",
+    input_schema={
+        "type": "object",
+        "properties": {
+            "run_id": {
+                "type": "string",
+                "description": "The run ID to save"
+            }
+        },
+        "required": ["run_id"]
+    }
+)
+class SaveToTradeVizTool:
+    def execute(self, **inputs) -> Dict[str, Any]:
+        """Save to Trade Viz - handled by server."""
+        return {"status": "success", "run_id": inputs.get("run_id")}
+
+
+@ToolRegistry.register(
+    tool_id="delete_run",
+    category=ToolCategory.UTILITY,
+    name="Delete Run",
+    description="Delete a run and its associated data files",
+    input_schema={
+        "type": "object",
+        "properties": {
+            "run_id": {
+                "type": "string",
+                "description": "The run ID to delete"
+            }
+        },
+        "required": ["run_id"]
+    }
+)
+class DeleteRunTool:
+    def execute(self, **inputs) -> Dict[str, Any]:
+        """Delete run - handled by server."""
+        return {"status": "success", "run_id": inputs.get("run_id")}
+@ToolRegistry.register(
+    tool_id="train_model",
+    category=ToolCategory.STRATEGY,
+    name="Train ML Model",
+    description="Train a machine learning model (XGBoost, CNN, etc.) on historical data",
+    input_schema={
+        "type": "object",
+        "properties": {
+            "model_type": {
+                "type": "string",
+                "enum": ["xgboost", "cnn", "lstm"],
+                "description": "Type of model to train"
+            },
+            "target": {
+                "type": "string",
+                "description": "Training target (e.g., 'next_bar_direction', 'atr_cross')"
+            },
+            "start_date": {
+                "type": "string",
+                "description": "Training start date (YYYY-MM-DD)"
+            },
+            "end_date": {
+                "type": "string",
+                "description": "Training end date (YYYY-MM-DD)"
+            },
+            "params": {
+                "type": "object",
+                "description": "Training hyperparameters"
+            }
+        },
+        "required": ["model_type", "target", "start_date", "end_date"]
+    }
+)
+class TrainModelTool:
+    def execute(self, **inputs) -> Dict[str, Any]:
+        """Train model - handled by server."""
+        return {"status": "queued", "model_type": inputs.get("model_type")}

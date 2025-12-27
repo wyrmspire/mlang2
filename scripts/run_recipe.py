@@ -11,6 +11,10 @@ import json
 import asyncio
 from pathlib import Path
 from datetime import datetime
+import sys
+import pandas as pd
+import numpy as np
+from datetime import timedelta
 
 from src.experiments.config import ExperimentConfig
 from src.experiments.runner import run_experiment
@@ -18,7 +22,7 @@ from src.sim.oco_engine import OCOConfig
 from src.features.pipeline import FeatureConfig
 from src.viz.export import Exporter
 from src.policy.composite_scanner import CompositeScanner
-from src.config import RESULTS_DIR
+from src.config import RESULTS_DIR, NY_TZ
 
 
 def main():
@@ -46,10 +50,6 @@ def main():
     # Mock Data Injection
     if args.mock:
         print("WARNING: Using MOCK data mode.")
-        import pandas as pd
-        import numpy as np
-        from datetime import timedelta
-        from src.config import NY_TZ
         
         def mock_loader(**kwargs):
             # Generate 1000 bars of sine wave price
@@ -70,16 +70,14 @@ def main():
             })
             return df
             
-            return df
-            
         import src.data.loader
         import src.experiments.runner
         
-        # Patch the source (good practice)
+        # Patch the source
         src.data.loader.load_continuous_contract = mock_loader
         src.data.loader.load_processed_1m = lambda **kw: mock_loader()
         
-        # Patch the consumer (CRITICAL because of 'from X import Y')
+        # Patch the consumer
         src.experiments.runner.load_continuous_contract = mock_loader
         src.experiments.runner.load_processed_1m = lambda **kw: mock_loader()
 
@@ -89,23 +87,15 @@ def main():
     print(f"Initialized scanner: {scanner.scanner_id}")
     
     # 3. Configure Experiment
-    # Use OCO settings from recipe if available, else defaults
     oco_config = recipe.get("oco", {})
     entry_trigger = recipe.get("entry_trigger", {})
-    
-    # Determine defaults based on recipe or args
-    # Note: ExperimentConfig usually takes start/end dates
-    
-    from src.config import CONTINUOUS_CONTRACT_PATH
     
     # Determine dates
     if args.start_date:
         start_date = args.start_date
         end_date = args.end_date
     else:
-        # Default to last N days
-        # (Simplified date logic for now)
-        start_date = "2025-01-01" # Placeholder, clearer logic in real app
+        start_date = "2025-01-01"
         end_date = "2025-01-30"
         
     oco_settings = OCOConfig(
@@ -150,7 +140,7 @@ def main():
         return original_factory(scanner_id, **kwargs)
         
     src.policy.scanners.get_scanner = mock_factory
-    src.experiments.runner.get_scanner = mock_factory # Patch consumer!
+    src.experiments.runner.get_scanner = mock_factory 
     
     try:
         # 6. Run Experiment
@@ -212,7 +202,6 @@ def main():
             print(f"⚠️  Could not save to ExperimentDB: {e}")
         
         print(f"Success! Output at: {out_dir}")
-        print("Don't forget to validate: python golden/validate_run.py " + str(out_dir))
         
     finally:
         # Restore factory
