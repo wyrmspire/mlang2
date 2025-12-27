@@ -32,6 +32,7 @@ import src.tools.agent_tools  # noqa: F401
 import src.core.strategy_tool  # noqa: F401 - Registers CompositeStrategyRunner
 import src.skills.indicator_skills  # noqa: F401 - Registers indicator tools
 import src.skills.data_skills  # noqa: F401 - Registers data tools
+import src.skills.pattern_skills  # noqa: F401 - Registers pattern tools
 
 
 
