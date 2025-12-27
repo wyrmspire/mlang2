@@ -46,6 +46,10 @@ app.include_router(replay_router)
 from src.server.infer_routes import router as infer_router
 app.include_router(infer_router)
 
+# Mount experiments router
+from src.server.db_routes import router as db_router
+app.include_router(db_router)
+
 
 # CORS for frontend
 app.add_middleware(
@@ -698,6 +702,7 @@ async def run_strategy_endpoint(request: StrategyRunRequest) -> Dict[str, Any]:
             "--recipe", recipe_path,
             "--out", run_id,
             "--start-date", request.start_date,
+            "--light",  # Default to light mode for agent scans
         ]
         
         # Calculate end date from weeks
@@ -1047,7 +1052,8 @@ Be concise but insightful. Users want to iterate fast."""
                                     "--recipe", recipe_path,
                                     "--out", run_name,
                                     "--start-date", start_dt.strftime("%Y-%m-%d"),
-                                    "--end-date", end_dt.strftime("%Y-%m-%d")
+                                    "--end-date", end_dt.strftime("%Y-%m-%d"),
+                                    "--light" # Default to light mode for lab scans
                                 ]
                                 
                                 proc = subprocess.run(
@@ -1066,53 +1072,46 @@ Be concise but insightful. Users want to iterate fast."""
                                     
                                     out_dir = RESULTS_DIR / "viz" / full_run_id
                                     
-                                    # Load actual results
-                                    trades_file = out_dir / "trades.jsonl"
-                                    decisions_file = out_dir / "decisions.jsonl"
+                                    # Load actual results from ExperimentDB instead of files
+                                    # Because light mode skips file generation
+                                    from src.storage import ExperimentDB
+                                    db = ExperimentDB()
+                                    run_record = db.get_run(full_run_id)
                                     
-                                    trades_list = []
-                                    total_pnl = 0.0
-                                    wins = 0
-                                    losses = 0
-                                    
-                                    if trades_file.exists():
-                                        with open(trades_file) as f:
-                                            for line in f:
-                                                if line.strip():
-                                                    t = json.loads(line)
-                                                    trades_list.append(t)
-                                                    pnl = t.get('pnl_dollars', 0)
-                                                    total_pnl += pnl
-                                                    if pnl > 0:
-                                                        wins += 1
-                                                    else:
-                                                        losses += 1
-                                    
-                                    total_trades = len(trades_list)
-                                    win_rate = wins / total_trades if total_trades > 0 else 0
-                                    
-                                    reply = f"✅ **Strategy Backtest Complete**\n\n"
-                                    reply += f"**Strategy:** {fn_args.get('trigger_type', 'modular').upper()}\n"
-                                    reply += f"**Period:** {start_dt.strftime('%Y-%m-%d')} to {end_dt.strftime('%Y-%m-%d')}\n"
-                                    reply += f"**Total Trades:** {total_trades}\n"
-                                    reply += f"**Win Rate:** {(win_rate * 100):.1f}%\n"
-                                    reply += f"**Total P&L:** ${total_pnl:.2f}\n"
-                                    reply += f"**Run ID:** `{full_run_id}`\n\n"
-                                    
-                                    if not fn_args.get("silent"):
-                                        reply += "Click '📊 Visualize' below to see the full chart with trades."
+                                    if run_record:
+                                        total_trades = run_record.get('total_trades', 0)
+                                        wins = run_record.get('wins', 0)
+                                        losses = run_record.get('losses', 0)
+                                        total_pnl = run_record.get('total_pnl', 0.0)
+                                        win_rate = run_record.get('win_rate', 0.0)
+
+                                        reply = f"✅ **Strategy Backtest Complete**\n\n"
+                                        reply += f"**Strategy:** {fn_args.get('trigger_type', 'modular').upper()}\n"
+                                        reply += f"**Period:** {start_dt.strftime('%Y-%m-%d')} to {end_dt.strftime('%Y-%m-%d')}\n"
+                                        reply += f"**Total Trades:** {total_trades}\n"
+                                        reply += f"**Win Rate:** {(win_rate * 100):.1f}%\n"
+                                        reply += f"**Total P&L:** ${total_pnl:.2f}\n"
+                                        reply += f"**Run ID:** `{full_run_id}`\n\n"
+
+                                        if not fn_args.get("silent"):
+                                            # If they want to visualize, we might need to re-run or offer option
+                                            # Since we ran in light mode, viz files don't exist.
+                                            reply += "Run is in Light Mode. To see chart, ask me to 'Visualize this run'."
+                                        else:
+                                            reply += "(Run performed in Light Mode)"
+
+                                        result = {
+                                            "strategy": fn_args.get("trigger_type", "modular").upper(),
+                                            "trades": total_trades,
+                                            "wins": wins,
+                                            "losses": losses,
+                                            "win_rate": win_rate,
+                                            "total_pnl": total_pnl,
+                                            "run_id": full_run_id
+                                        }
                                     else:
-                                        reply += "(Run performed silently. Visuals available via manual load if needed.)"
-                                    
-                                    result = {
-                                        "strategy": fn_args.get("trigger_type", "modular").upper(),
-                                        "trades": total_trades,
-                                        "wins": wins,
-                                        "losses": losses,
-                                        "win_rate": win_rate,
-                                        "total_pnl": total_pnl,
-                                        "run_id": full_run_id
-                                    }
+                                        reply = f"⚠️ Run completed but results not found in DB."
+                                        result = None
                                 else:
                                     reply = f"❌ Strategy run failed:\n```\n{proc.stderr[-500:]}\n```"
                             except subprocess.TimeoutExpired:

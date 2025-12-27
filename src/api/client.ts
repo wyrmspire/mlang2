@@ -270,5 +270,30 @@ export const api = {
             throw new Error(`YFinance fetch failed: ${response.status}`);
         }
         return response.json();
+    },
+
+    getExperiments: async (params: any = {}): Promise<any> => {
+        const hasBackend = await checkBackend();
+        if (!hasBackend) throw new Error('Backend unavailable');
+        const query = new URLSearchParams(params).toString();
+        const response = await fetch(`${API_BASE}/experiments?${query}`);
+        if (!response.ok) throw new Error('Failed to fetch experiments');
+        return response.json();
+    },
+
+    deleteExperiment: async (runId: string): Promise<any> => {
+        const hasBackend = await checkBackend();
+        if (!hasBackend) throw new Error('Backend unavailable');
+        const response = await fetch(`${API_BASE}/experiments/${runId}`, { method: 'DELETE' });
+        if (!response.ok) throw new Error('Failed to delete experiment');
+        return response.json();
+    },
+
+    visualizeExperiment: async (runId: string): Promise<any> => {
+        const hasBackend = await checkBackend();
+        if (!hasBackend) throw new Error('Backend unavailable');
+        const response = await fetch(`${API_BASE}/experiments/${runId}/visualize`, { method: 'POST' });
+        if (!response.ok) throw new Error('Failed to visualize experiment');
+        return response.json();
     }
 };
