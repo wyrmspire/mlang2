@@ -44,8 +44,7 @@ results/
 shards/
 cache/
 cache/**
-data/processed/
-data/raw/
+
 
 # Logs and runtime
 *.log

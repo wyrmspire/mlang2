@@ -98,6 +98,7 @@ find "$PROJECT_ROOT" -type f \( -name "*.py" -o -name "*.sh" -o -name "*.md" -o 
     ! -path "*/results/*" \
     ! -path "*/.venv/*" \
     ! -path "*/venv/*" \
+    ! -name "continuous_contract.json" \
     ! -name "dump*.md" \
     | sort | while read -r file; do
     
