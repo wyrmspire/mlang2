@@ -86,10 +86,10 @@ class FetchOHLCVTool:
 
 
 @ToolRegistry.register(
-    tool_id="get_current_price",
+    tool_id="get_dataset_last_price",
     category=ToolCategory.UTILITY,
-    name="Get Current Price",
-    description="Get the latest close price for a symbol",
+    name="Get Dataset Last Price",
+    description="Get the last close price in the historical dataset (end of Sept 2025). This is NOT live market data.",
     input_schema={
         "type": "object",
         "properties": {
@@ -104,23 +104,78 @@ class FetchOHLCVTool:
         "type": "object",
         "properties": {
             "price": {"type": "number"},
-            "timestamp": {"type": "string"}
+            "timestamp": {"type": "string"},
+            "note": {"type": "string"}
         }
     }
 )
-class GetCurrentPriceTool:
+class GetDatasetLastPriceTool:
     def execute(self, symbol: str = "continuous", **kwargs) -> Dict[str, Any]:
-        """Get the latest close price."""
+        """Get the last price from the historical dataset."""
         df = loader.load_continuous_contract()
         if df.empty:
-            return {"price": 0.0, "timestamp": ""}
+            return {"price": 0.0, "timestamp": "", "note": "Dataset is empty"}
         
         price = float(df['close'].iloc[-1])
         timestamp = str(df['time'].iloc[-1])
         
         return {
             "price": price,
-            "timestamp": timestamp
+            "timestamp": timestamp,
+            "note": "This is the END of the historical dataset, not live market data"
+        }
+
+
+@ToolRegistry.register(
+    tool_id="get_dataset_summary",
+    category=ToolCategory.UTILITY,
+    name="Get Dataset Summary",
+    description="Get summary statistics about the historical dataset (March-Sept 2025): date range, total bars, volatility metrics",
+    input_schema={
+        "type": "object",
+        "properties": {}
+    },
+    output_schema={
+        "type": "object",
+        "properties": {
+            "start_date": {"type": "string"},
+            "end_date": {"type": "string"},
+            "total_bars": {"type": "integer"},
+            "avg_daily_range": {"type": "number"},
+            "avg_volume": {"type": "number"},
+            "period_description": {"type": "string"}
+        }
+    }
+)
+class GetDatasetSummaryTool:
+    def execute(self, **kwargs) -> Dict[str, Any]:
+        """Get summary statistics about the historical dataset."""
+        df = loader.load_continuous_contract()
+        if df.empty:
+            return {
+                "start_date": "",
+                "end_date": "",
+                "total_bars": 0,
+                "avg_daily_range": 0.0,
+                "avg_volume": 0.0,
+                "period_description": "No data available"
+            }
+        
+        start_date = str(df['time'].iloc[0].date())
+        end_date = str(df['time'].iloc[-1].date())
+        total_bars = len(df)
+        
+        # Calculate average daily range (high - low)
+        daily_range = (df['high'] - df['low']).mean()
+        avg_volume = df['volume'].mean()
+        
+        return {
+            "start_date": start_date,
+            "end_date": end_date,
+            "total_bars": total_bars,
+            "avg_daily_range": float(daily_range),
+            "avg_volume": float(avg_volume),
+            "period_description": f"Historical MES data from {start_date} to {end_date} ({total_bars:,} 1-minute bars)"
         }
 
 

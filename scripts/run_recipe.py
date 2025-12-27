@@ -159,6 +159,58 @@ def main():
         # 7. Finalize
         exporter.finalize(out_dir)
         
+        # 8. Save to ExperimentDB
+        try:
+            from src.storage import ExperimentDB
+            
+            # Load trades to calculate metrics
+            trades_file = out_dir / "trades.jsonl"
+            total_pnl = 0.0
+            wins = 0
+            losses = 0
+            total_trades = 0
+            
+            if trades_file.exists():
+                with open(trades_file) as f:
+                    for line in f:
+                        if line.strip():
+                            t = json.loads(line)
+                            total_trades += 1
+                            pnl = t.get('pnl_dollars', 0)
+                            total_pnl += pnl
+                            if pnl > 0:
+                                wins += 1
+                            else:
+                                losses += 1
+            
+            win_rate = wins / total_trades if total_trades > 0 else 0
+            avg_pnl = total_pnl / total_trades if total_trades > 0 else 0
+            
+            # Store in database
+            db = ExperimentDB()
+            db.store_run(
+                run_id=args.out,
+                strategy=recipe.get('name', 'composite_strategy'),
+                config={
+                    'recipe': recipe,
+                    'start_date': start_date,
+                    'end_date': end_date,
+                    'entry_trigger': entry_trigger,
+                    'oco': oco_config
+                },
+                metrics={
+                    'total_trades': total_trades,
+                    'wins': wins,
+                    'losses': losses,
+                    'win_rate': win_rate,
+                    'total_pnl': total_pnl,
+                    'avg_pnl_per_trade': avg_pnl
+                }
+            )
+            print(f"✅ Saved to ExperimentDB: {args.out}")
+        except Exception as e:
+            print(f"⚠️  Could not save to ExperimentDB: {e}")
+        
         print(f"Success! Output at: {out_dir}")
         print("Don't forget to validate: python golden/validate_run.py " + str(out_dir))
         

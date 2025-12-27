@@ -314,6 +314,11 @@ class StartLiveModeTool:
                 "enum": ["win_rate", "total_pnl", "total_trades"],
                 "description": "Metric to sort by"
             },
+            "min_trades": {
+                "type": "integer",
+                "description": "Minimum number of trades required to include experiment in results",
+                "default": 1
+            },
             "top_k": {
                 "type": "integer",
                 "description": "Number of results to return",

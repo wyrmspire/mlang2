@@ -575,9 +575,14 @@ def build_agent_system_prompt(context: ChatContext, decisions: List[Dict], trade
     
     current_json = json.dumps(current, indent=2, default=str)[:1000] if current else "None selected"
 
-    return f"""You are a STRATEGY SCAN agent for the MLang2 trading research platform.
+    return f"""You are a STRATEGY RESEARCH agent for the MLang2 backtesting platform.
 
-YOUR PURPOSE: Create and run strategy scans on historical data so users can visually analyze trade setups.
+YOUR PURPOSE: Analyze HISTORICAL data to discover patterns and create strategies. You create backtests that generate:
+1. Visual trade overlays (so users can see if setups make sense)
+2. Decision records (training data for ML models)
+
+IMPORTANT: You are working with a FIXED HISTORICAL DATASET (March 18 - September 17, 2025). 
+This is NOT live market data. When you query data, you're analyzing past patterns to find what worked.
 
 CURRENT CONTEXT:
 - Run ID: {context.runId or "No run loaded"}
@@ -587,11 +592,18 @@ CURRENT CONTEXT:
 CURRENT {item_type.upper()} DATA:
 {current_json}
 
+AVAILABLE TOOLS:
+- get_dataset_summary: Get stats about the historical dataset (volatility, date range, total bars)
+- check_ema_cross: Check if EMAs crossed in the data
+- get_rsi: Calculate RSI from price data
+- fetch_ohlcv: Get historical bars for a date range
+- run_composite_strategy: Execute a backtest strategy and generate visualization
+
 TRIGGER TYPES AND THEIR PARAMETERS:
 - ema_cross: {{fast: 9, slow: 21}} - EMA crossover signals
 - ema_bounce: {{period: 21, threshold: 0.5}} - Price bouncing off EMA
 - rsi_threshold: {{overbought: 70, oversold: 30}} - RSI extremes
-- ifvg: {{}} - Institutional fair value gaps
+- ifvg: {{}} - Institutional fair value gaps  
 - orb: {{range_minutes: 15}} - Opening range breakout
 - candle_pattern: {{pattern: "engulfing"}} - Candlestick patterns
 - time: {{hour: 9, minute: 30}} - Time-based triggers
@@ -601,11 +613,16 @@ BRACKET TYPES:
 - percent: Uses percentage of price
 - fixed: Fixed point values
 
-DATA RANGE: March 18 - September 17, 2025.
+WORKFLOW EXAMPLE:
+User: "Create a strategy for the 10am-2pm move"
+You:
+1. Call get_dataset_summary to understand volatility
+2. Call check_ema_cross or get_rsi to see what patterns exist
+3. Design a strategy (JSON recipe) that captures that pattern
+4. Call run_composite_strategy to backtest it
+5. User sees the results in Trade Viz
 
-Use your tools to help the user. When they ask to run/create/test a strategy, use run_strategy.
-When they want to navigate, use set_index. When they want to load a different run, use load_run.
-Be concise and action-oriented."""
+Use your tools to help the user research patterns in the historical data."""
 
 
 
@@ -875,12 +892,21 @@ async def lab_agent(request: LabChatRequest):
         return {"reply": "No message provided.", "type": "text"}
     
     # Build system prompt for lab agent
-    lab_system_prompt = """You are a Research Lab agent for the MLang2 trading research platform.
+    lab_system_prompt = """You are a PROACTIVE Research Lab agent for the MLang2 backtesting platform.
 
-YOUR PURPOSE: Help users design, test, and analyze trading strategies. You can:
-1. Run modular strategy scans with custom triggers and brackets
-2. Start live trading simulations
-3. Query past experiment results
+YOUR PURPOSE: Help users design, test, and analyze trading strategies on HISTORICAL data (March-Sept 2025).
+
+BE PROACTIVE:
+- When users ask to test something, RUN IT IMMEDIATELY without asking for confirmation
+- After running a strategy, the results will AUTOMATICALLY appear in the UI with a '📊 Visualize' button
+- You don't need to tell them to "load" the run - just describe what you found
+
+YOUR TOOLS:
+1. run_modular_strategy - Execute a backtest and get real results (trades, win rate, P&L)
+2. query_experiments - Find top-performing past strategies
+3. get_dataset_summary - Get stats about the historical dataset
+4. check_ema_cross - Analyze EMA patterns
+5. get_rsi - Calculate RSI values
 
 TRIGGER TYPES:
 - ema_cross: EMA crossover (params: fast, slow) 
@@ -896,10 +922,16 @@ BRACKET TYPES:
 - percent: Percentage-based
 - fixed: Fixed point values
 
-DATA RANGE: March 18 - September 17, 2025.
+WORKFLOW EXAMPLES:
+User: "test a random strategy"
+You: *Call run_modular_strategy with random params*
+Then say: "I tested RSI(70/30) with 1.5/2.5 ATR brackets over 6 weeks. Found 12 trades, 58% win rate, +$450 P&L. The best trade was on April 15th."
 
-Use your tools proactively. When users ask to test something, run it immediately.
-Be concise and results-focused."""
+User: "build me a 10am strategy"
+You: *Call run_modular_strategy with time trigger at 10:00*
+Then summarize the results conversationally.
+
+Be concise but insightful. Users want to iterate fast."""
 
     # Build messages
     gemini_contents = []
@@ -945,31 +977,50 @@ Be concise and results-focused."""
                         print(f"[LAB AGENT] Function call: {fn_name}({fn_args})")
                         
                         if fn_name == "run_modular_strategy":
-                            # Build config and run the strategy
-                            config = {
-                                "trigger": {
+                            # Build recipe from config
+                            import tempfile
+                            from datetime import timedelta
+                            import pandas as pd
+                            
+                            recipe = {
+                                "name": f"Lab: {fn_args.get('trigger_type', 'test')}",
+                                "cooldown_bars": 20,
+                                "entry_trigger": {
                                     "type": fn_args.get("trigger_type", "ema_cross"),
                                     **fn_args.get("trigger_params", {})
                                 },
-                                "bracket": {
-                                    "type": fn_args.get("bracket_type", "atr"),
-                                    "stop_atr": fn_args.get("stop_atr", 2.0),
-                                    "tp_atr": fn_args.get("tp_atr", 3.0)
+                                "oco": {
+                                    "entry": "MARKET",
+                                    "take_profit": {
+                                        "multiple": fn_args.get("tp_atr", 2.5)
+                                    },
+                                    "stop_loss": {
+                                        "multiple": fn_args.get("stop_atr", 1.5)
+                                    }
                                 }
                             }
                             
-                            run_name = fn_args.get("run_name") or f"lab_{fn_args.get('trigger_type')}_{fn_args.get('start_date', '').replace('-', '')}"
-                            out_dir = RESULTS_DIR / run_name
+                            # Write recipe to temp file
+                            with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+                                json.dump(recipe, f, indent=2)
+                                recipe_path = f.name
                             
-                            cmd = [
-                                "python", "scripts/backtest_modular_strategy.py",
-                                "--config", json.dumps(config),
-                                "--start-date", fn_args.get("start_date", "2025-03-18"),
-                                "--weeks", str(fn_args.get("weeks", 1)),
-                                "--out", str(out_dir)
-                            ]
+                            run_name = fn_args.get("run_name") or f"lab_{fn_args.get('trigger_type')}_{fn_args.get('start_date', '').replace('-', '')}"
                             
                             try:
+                                # Calculate end date
+                                start_dt = pd.to_datetime(fn_args.get("start_date", "2025-03-18"))
+                                end_dt = start_dt + timedelta(weeks=fn_args.get("weeks", 1))
+                                
+                                # Use run_recipe.py (Golden Path script)
+                                cmd = [
+                                    sys.executable, "-m", "scripts.run_recipe",
+                                    "--recipe", recipe_path,
+                                    "--out", run_name,
+                                    "--start-date", start_dt.strftime("%Y-%m-%d"),
+                                    "--end-date", end_dt.strftime("%Y-%m-%d")
+                                ]
+                                
                                 proc = subprocess.run(
                                     cmd,
                                     capture_output=True,
@@ -979,28 +1030,50 @@ Be concise and results-focused."""
                                 )
                                 
                                 if proc.returncode == 0:
-                                    # Parse output for results
-                                    output = proc.stdout
                                     run_id = run_name
+                                    out_dir = RESULTS_DIR / "viz" / run_name
                                     
-                                    # Try to extract stats
-                                    trades_match = re.search(r"Saved (\d+) records", output)
-                                    trades = int(trades_match.group(1)) if trades_match else 0
+                                    # Load actual results
+                                    trades_file = out_dir / "trades.jsonl"
+                                    decisions_file = out_dir / "decisions.jsonl"
                                     
-                                    reply = f"✅ **Strategy Scan Complete**\n\n"
-                                    reply += f"**Trigger:** {fn_args.get('trigger_type')}\n"
-                                    reply += f"**Period:** {fn_args.get('start_date')} ({fn_args.get('weeks')} week(s))\n"
-                                    reply += f"**Trades Found:** {trades}\n"
+                                    trades_list = []
+                                    total_pnl = 0.0
+                                    wins = 0
+                                    losses = 0
+                                    
+                                    if trades_file.exists():
+                                        with open(trades_file) as f:
+                                            for line in f:
+                                                if line.strip():
+                                                    t = json.loads(line)
+                                                    trades_list.append(t)
+                                                    pnl = t.get('pnl_dollars', 0)
+                                                    total_pnl += pnl
+                                                    if pnl > 0:
+                                                        wins += 1
+                                                    else:
+                                                        losses += 1
+                                    
+                                    total_trades = len(trades_list)
+                                    win_rate = wins / total_trades if total_trades > 0 else 0
+                                    
+                                    reply = f"✅ **Strategy Backtest Complete**\n\n"
+                                    reply += f"**Strategy:** {fn_args.get('trigger_type', 'modular').upper()}\n"
+                                    reply += f"**Period:** {start_dt.strftime('%Y-%m-%d')} to {end_dt.strftime('%Y-%m-%d')}\n"
+                                    reply += f"**Total Trades:** {total_trades}\n"
+                                    reply += f"**Win Rate:** {(win_rate * 100):.1f}%\n"
+                                    reply += f"**Total P&L:** ${total_pnl:.2f}\n"
                                     reply += f"**Run ID:** `{run_name}`\n\n"
-                                    reply += "Click 'Visualize' to analyze the trades."
+                                    reply += "Click '📊 Visualize' below to see the full chart with trades."
                                     
                                     result = {
                                         "strategy": fn_args.get("trigger_type", "modular").upper(),
-                                        "trades": trades,
-                                        "wins": 0,
-                                        "losses": 0,
-                                        "win_rate": 0,
-                                        "total_pnl": 0
+                                        "trades": total_trades,
+                                        "wins": wins,
+                                        "losses": losses,
+                                        "win_rate": win_rate,
+                                        "total_pnl": total_pnl
                                     }
                                 else:
                                     reply = f"❌ Strategy run failed:\n```\n{proc.stderr[-500:]}\n```"
@@ -1008,6 +1081,12 @@ Be concise and results-focused."""
                                 reply = "❌ Strategy timed out (>120s)"
                             except Exception as e:
                                 reply = f"❌ Error: {str(e)}"
+                            finally:
+                                # Clean up temp recipe file
+                                try:
+                                    Path(recipe_path).unlink()
+                                except:
+                                    pass
                         
                         elif fn_name == "start_live_mode":
                             try:
@@ -1041,11 +1120,22 @@ Be concise and results-focused."""
                             try:
                                 from src.storage import ExperimentDB
                                 db = ExperimentDB()
-                                best = db.query_best(fn_args.get("sort_by", "win_rate"), top_k=fn_args.get("top_k", 5))
+                                # Allow agent to specify min_trades, default to 1 for research
+                                min_trades = fn_args.get("min_trades", 1)
+                                best = db.query_best(
+                                    fn_args.get("sort_by", "win_rate"), 
+                                    top_k=fn_args.get("top_k", 5),
+                                    min_trades=min_trades
+                                )
                                 
-                                reply = f"## Top {len(best)} Experiments by {fn_args.get('sort_by', 'win_rate')}\n\n"
+                                reply = f"## Top {len(best)} Experiments by {fn_args.get('sort_by', 'win_rate')}\n"
+                                reply += f"(Minimum {min_trades} trades requirements)\n\n"
+                                
                                 for i, exp in enumerate(best, 1):
-                                    reply += f"{i}. **{exp.get('strategy', 'unknown')}**: {exp.get('win_rate', 0):.1%} WR, {exp.get('total_trades', 0)} trades\n"
+                                    reply += f"{i}. **{exp.get('strategy', 'unknown')}**: {exp.get('win_rate', 0):.1%} WR, {exp.get('total_trades', 0)} trades, ${exp.get('total_pnl', 0):.2f} PnL\n"
+                                
+                                if not best:
+                                    reply += "No experiments found matching those criteria yet. Run some strategies first!"
                             except Exception as e:
                                 reply = f"❌ Error querying experiments: {str(e)}"
                         
