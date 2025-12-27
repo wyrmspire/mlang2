@@ -9,8 +9,9 @@ import { ChatAgent } from './components/ChatAgent';
 import { LiveSessionView } from './components/LiveSessionView';
 import { StatsPanel } from './components/StatsPanel';
 import { LabPage } from './components/LabPage';
+import ExperimentsView from './components/ExperimentsView';
 
-type PageType = 'trade' | 'lab';
+type PageType = 'trade' | 'lab' | 'experiments';
 
 const App: React.FC = () => {
   const [currentPage, setCurrentPage] = useState<PageType>('trade');
@@ -178,6 +179,30 @@ const App: React.FC = () => {
     );
   }
 
+  // If Experiments page is active
+  if (currentPage === 'experiments') {
+    return (
+      <div className="flex flex-col h-screen w-full bg-slate-900 overflow-hidden">
+        <div className="h-12 flex items-center gap-4 px-4 bg-slate-800 border-b border-slate-700 shrink-0">
+          <button
+            onClick={() => setCurrentPage('trade')}
+            className="text-slate-400 hover:text-white px-3 py-1"
+          >
+            Back to Trade View
+          </button>
+        </div>
+        <div className="flex-1 overflow-hidden min-h-0">
+          <ExperimentsView
+            onLoadRun={(runId: string) => {
+              setCurrentRun(runId);
+              setCurrentPage('trade');
+            }}
+          />
+        </div>
+      </div>
+    );
+  }
+
   // Trade View (default)
   return (
     <div className="flex h-screen w-full bg-slate-900 overflow-hidden">
@@ -194,6 +219,12 @@ const App: React.FC = () => {
               className="bg-green-600 hover:bg-green-500 text-white text-xs px-2 py-1 rounded"
             >
               🔬 Lab
+            </button>
+            <button
+              onClick={() => setCurrentPage('experiments')}
+              className="bg-blue-600 hover:bg-blue-500 text-white text-xs px-2 py-1 rounded"
+            >
+              🧪 Experiments
             </button>
           </div>
           <button

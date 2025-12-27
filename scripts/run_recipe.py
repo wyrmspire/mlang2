@@ -33,6 +33,7 @@ def main():
     parser.add_argument("--end-date", help="YYYY-MM-DD")
     parser.add_argument("--days", type=int, default=30, help="Days to run if no days provided")
     parser.add_argument("--mock", action="store_true", help="Use synthetic data for testing")
+    parser.add_argument("--light", action="store_true", help="Light mode: Database only, no viz files")
     
     args = parser.parse_args()
     
@@ -123,12 +124,16 @@ def main():
     from src.viz.config import VizConfig
     out_dir = RESULTS_DIR / "viz" / args.out
     
-    viz_config = VizConfig()
-    exporter = Exporter(
-        config=viz_config,
-        run_id=args.out,
-        experiment_config=config.to_dict()
-    )
+    exporter = None
+    if not args.light:
+        viz_config = VizConfig()
+        exporter = Exporter(
+            config=viz_config,
+            run_id=args.out,
+            experiment_config=config.to_dict()
+        )
+    else:
+        print("💡 Light Mode enabled: Skipping Exporter initialization")
     
     # 5. Monkey Patch get_scanner
     import src.policy.scanners
@@ -147,34 +152,21 @@ def main():
         result = run_experiment(config, exporter=exporter)
         
         # 7. Finalize
-        exporter.finalize(out_dir)
+        if exporter:
+            exporter.finalize(out_dir)
         
         # 8. Save to ExperimentDB
         try:
             from src.storage import ExperimentDB
             
-            # Load trades to calculate metrics
-            trades_file = out_dir / "trades.jsonl"
-            total_pnl = 0.0
-            wins = 0
-            losses = 0
-            total_trades = 0
-            
-            if trades_file.exists():
-                with open(trades_file) as f:
-                    for line in f:
-                        if line.strip():
-                            t = json.loads(line)
-                            total_trades += 1
-                            pnl = t.get('pnl_dollars', 0)
-                            total_pnl += pnl
-                            if pnl > 0:
-                                wins += 1
-                            else:
-                                losses += 1
+            # Calculate metrics from result (in-memory)
+            total_trades = result.total_trades
+            total_pnl = result.total_pnl
+            wins = result.trade_wins
+            losses = result.trade_losses
             
             win_rate = wins / total_trades if total_trades > 0 else 0
-            avg_pnl = total_pnl / total_trades if total_trades > 0 else 0
+            avg_pnl = result.avg_pnl
             
             # Store in database
             db = ExperimentDB()
