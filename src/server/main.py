@@ -655,7 +655,7 @@ class StrategyRunRequest(BaseModel):
     weeks: int = 1
     run_name: Optional[str] = None
     config: Dict[str, Any]
-
+    light: bool = False  # Default to full visualization
 
 @app.post("/agent/run-strategy")
 async def run_strategy_endpoint(request: StrategyRunRequest) -> Dict[str, Any]:
@@ -704,6 +704,10 @@ async def run_strategy_endpoint(request: StrategyRunRequest) -> Dict[str, Any]:
             "--start-date", request.start_date,
             "--light",  # Default to light mode for agent scans
         ]
+        
+        # Add light mode flag if requested
+        if request.light:
+            cmd.append("--light")
         
         # Calculate end date from weeks
         from datetime import timedelta
@@ -754,11 +758,6 @@ async def run_strategy_endpoint(request: StrategyRunRequest) -> Dict[str, Any]:
             Path(recipe_path).unlink()
         except:
             pass
-
-        return {
-            "success": False,
-            "error": str(e)
-        }
 
 
 @app.post("/agent/chat")

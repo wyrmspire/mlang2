@@ -180,3 +180,12 @@ async def visualize_experiment(run_id: str):
             Path(recipe_path).unlink()
         except:
             pass
+
+@router.get("/summary")
+async def experiments_summary():
+    """Get aggregate stats by strategy."""
+    try:
+        db = ExperimentDB()
+        return db.list_strategies()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

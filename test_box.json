@@ -1,10 +1,10 @@
 {
-    "name": "Simple EMA Cross Test",
-    "cooldown_bars": 20,
+    "name": "Test Box Strategy",
+    "cooldown_bars": 10,
     "entry_trigger": {
-        "type": "ema_cross",
-        "fast": 9,
-        "slow": 21
+        "type": "time",
+        "hour": 10,
+        "minute": 0
     },
     "oco": {
         "entry": "MARKET",

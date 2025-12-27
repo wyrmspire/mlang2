@@ -58,6 +58,10 @@ class ExperimentResult:
     
     # Training results
     train_result: Optional[TrainResult] = None
+
+    # Financial metrics
+    total_pnl: float = 0.0
+    avg_pnl: float = 0.0
     
     # Created at
     created_at: pd.Timestamp = None
@@ -470,6 +474,11 @@ def run_experiment(
         # Train
         train_result = train_model(model, train_loader, val_loader, config.train_config)
     
+    # Calculate financial metrics
+    total_pnl = sum(r.cf_pnl_dollars for r in records if r.cf_outcome in ['WIN', 'LOSS'])
+    trade_count = win_count + loss_count
+    avg_pnl = total_pnl / trade_count if trade_count > 0 else 0.0
+
     # 6. Return results
     return ExperimentResult(
         config=config,
@@ -479,5 +488,7 @@ def run_experiment(
         loss_records=loss_count,
         timeout_records=timeout_count,
         train_result=train_result,
+        total_pnl=total_pnl,
+        avg_pnl=avg_pnl,
         created_at=pd.Timestamp.now(),
     )

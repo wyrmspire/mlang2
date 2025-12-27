@@ -81,7 +81,6 @@ def main():
         # Patch the consumer
         src.experiments.runner.load_continuous_contract = mock_loader
         src.experiments.runner.load_processed_1m = lambda **kw: mock_loader()
-
     
     # 2. Build Scanner
     scanner = CompositeScanner(recipe)
@@ -120,12 +119,12 @@ def main():
         feature_config=feature_settings,
     )
     
-    # 4. Setup Exporter
-    from src.viz.config import VizConfig
+    # 4. Setup Exporter (ONLY IF NOT LIGHT MODE)
     out_dir = RESULTS_DIR / "viz" / args.out
-    
     exporter = None
+    
     if not args.light:
+        from src.viz.config import VizConfig
         viz_config = VizConfig()
         exporter = Exporter(
             config=viz_config,
@@ -133,7 +132,7 @@ def main():
             experiment_config=config.to_dict()
         )
     else:
-        print("💡 Light Mode enabled: Skipping Exporter initialization")
+        print("💡 Light Mode enabled: Skipping visualization export")
     
     # 5. Monkey Patch get_scanner
     import src.policy.scanners
@@ -151,22 +150,25 @@ def main():
         # 6. Run Experiment
         result = run_experiment(config, exporter=exporter)
         
-        # 7. Finalize
+        # 7. Finalize (ONLY IF EXPORTER EXISTS)
         if exporter:
             exporter.finalize(out_dir)
         
         # 8. Save to ExperimentDB
         try:
-            from src.storage import ExperimentDB
+            from src.storage.experiments_db import ExperimentDB
             
             # Calculate metrics from result (in-memory)
-            total_trades = result.total_trades
-            total_pnl = result.total_pnl
-            wins = result.trade_wins
-            losses = result.trade_losses
+            # Use attributes that exist on ExperimentResult
+            total_trades = getattr(result, 'total_trades', result.win_records + result.loss_records)
+            wins = getattr(result, 'trade_wins', result.win_records)
+            losses = getattr(result, 'trade_losses', result.loss_records)
             
             win_rate = wins / total_trades if total_trades > 0 else 0
-            avg_pnl = result.avg_pnl
+            
+            # total_pnl and avg_pnl may have been added to ExperimentResult
+            total_pnl = getattr(result, 'total_pnl', 0.0)
+            avg_pnl = getattr(result, 'avg_pnl', 0.0)
             
             # Store in database
             db = ExperimentDB()
@@ -189,11 +191,16 @@ def main():
                     'avg_pnl_per_trade': avg_pnl
                 }
             )
-            print(f"✅ Saved to ExperimentDB: {args.out}")
+            print(f"Saved to ExperimentDB: {args.out}")
         except Exception as e:
-            print(f"⚠️  Could not save to ExperimentDB: {e}")
+            print(f"Could not save to ExperimentDB: {e}")
+            import traceback
+            traceback.print_exc()
         
-        print(f"Success! Output at: {out_dir}")
+        if not args.light:
+            print(f"Success! Output at: {out_dir}")
+        else:
+            print(f"Success! (Light Mode - Results in DB only)")
         
     finally:
         # Restore factory
