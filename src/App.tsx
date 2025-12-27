@@ -158,16 +158,16 @@ const App: React.FC = () => {
   // If Lab page is active, render it instead
   if (currentPage === 'lab') {
     return (
-      <div className="flex flex-col h-screen w-full bg-slate-900 overflow-hidden">
-        <div className="h-12 flex items-center gap-4 px-4 bg-slate-800 border-b border-slate-700 shrink-0">
+      <div className="flex flex-col h-screen w-full bg-slate-900 overflow-hidden text-slate-100 font-sans">
+        <div className="h-14 flex items-center gap-4 px-6 bg-slate-850/80 backdrop-blur border-b border-slate-800 shrink-0">
           <button
             onClick={() => setCurrentPage('trade')}
-            className="text-slate-400 hover:text-white px-3 py-1"
+            className="flex items-center gap-2 text-slate-400 hover:text-white transition-colors px-3 py-1.5 rounded-md hover:bg-slate-800"
           >
-            Back to Trade View
+            <span>←</span> Back to Trade View
           </button>
         </div>
-        <div className="flex-1 overflow-hidden min-h-0">
+        <div className="flex-1 overflow-hidden min-h-0 bg-slate-900">
           <LabPage
             onLoadRun={(runId: string) => {
               setCurrentRun(runId);
@@ -182,16 +182,16 @@ const App: React.FC = () => {
   // If Experiments page is active
   if (currentPage === 'experiments') {
     return (
-      <div className="flex flex-col h-screen w-full bg-slate-900 overflow-hidden">
-        <div className="h-12 flex items-center gap-4 px-4 bg-slate-800 border-b border-slate-700 shrink-0">
+      <div className="flex flex-col h-screen w-full bg-slate-900 overflow-hidden text-slate-100 font-sans">
+        <div className="h-14 flex items-center gap-4 px-6 bg-slate-850/80 backdrop-blur border-b border-slate-800 shrink-0">
           <button
             onClick={() => setCurrentPage('trade')}
-            className="text-slate-400 hover:text-white px-3 py-1"
+            className="flex items-center gap-2 text-slate-400 hover:text-white transition-colors px-3 py-1.5 rounded-md hover:bg-slate-800"
           >
-            Back to Trade View
+            <span>←</span> Back to Trade View
           </button>
         </div>
-        <div className="flex-1 overflow-hidden min-h-0">
+        <div className="flex-1 overflow-hidden min-h-0 bg-slate-900">
           <ExperimentsView
             onLoadRun={(runId: string) => {
               setCurrentRun(runId);
@@ -205,41 +205,46 @@ const App: React.FC = () => {
 
   // Trade View (default)
   return (
-    <div className="flex h-screen w-full bg-slate-900 overflow-hidden">
+    <div className="flex h-screen w-full bg-slate-900 text-slate-100 font-sans overflow-hidden">
 
       {/* LEFT SIDEBAR - Expanded Width */}
-      <div className="w-96 flex flex-col border-r border-slate-700 bg-slate-800 shrink-0">
+      <div className="w-96 flex flex-col border-r border-slate-800 bg-slate-950 shrink-0 shadow-xl z-20">
 
         {/* Header */}
-        <div className="h-16 flex items-center justify-between px-4 border-b border-slate-700 shrink-0">
-          <div className="flex items-center gap-3">
-            <h1 className="font-bold text-white text-lg">Trade Viz</h1>
-            <button
-              onClick={() => setCurrentPage('lab')}
-              className="bg-green-600 hover:bg-green-500 text-white text-xs px-2 py-1 rounded"
-            >
-              🔬 Lab
-            </button>
-            <button
-              onClick={() => setCurrentPage('experiments')}
-              className="bg-blue-600 hover:bg-blue-500 text-white text-xs px-2 py-1 rounded"
-            >
-              🧪 Experiments
-            </button>
+        <div className="h-16 flex items-center justify-between px-6 border-b border-slate-800 shrink-0 bg-slate-950">
+          <div className="flex items-center gap-4">
+            <h1 className="font-bold text-white text-xl tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-teal-400">Trade Viz</h1>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setCurrentPage('lab')}
+                className="text-slate-400 hover:text-green-400 hover:bg-green-400/10 transition-all p-2 rounded-md"
+                title="Lab"
+              >
+                🔬
+              </button>
+              <button
+                onClick={() => setCurrentPage('experiments')}
+                className="text-slate-400 hover:text-blue-400 hover:bg-blue-400/10 transition-all p-2 rounded-md"
+                title="Experiments"
+              >
+                🧪
+              </button>
+            </div>
           </div>
           <button
             onClick={() => {
               setSimulationMode('SIMULATION');
               setShowSimulation(true);
             }}
-            className="bg-purple-600 hover:bg-purple-500 text-white text-xs px-3 py-1 rounded"
+            className="flex items-center justify-center w-8 h-8 rounded-full bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white shadow-lg shadow-purple-900/20 transition-all transform hover:scale-105"
+            title="Replay"
           >
-            ▶ Replay
+            ▶
           </button>
         </div>
 
         {/* Scrollable Content */}
-        <div className="flex-1 overflow-y-auto overflow-x-hidden p-2 space-y-4">
+        <div className="flex-1 overflow-y-auto overflow-x-hidden p-4 space-y-6 custom-scrollbar">
 
           <RunPicker onSelect={setCurrentRun} />
 
@@ -252,24 +257,25 @@ const App: React.FC = () => {
           />
 
           {!currentRun ? (
-            <div className="p-4 text-sm text-slate-400 text-center border border-dashed border-slate-700 rounded">
+            <div className="p-8 text-sm text-slate-500 text-center border border-dashed border-slate-800 rounded-lg bg-slate-900/50">
               <p>Select a run above to see details.</p>
             </div>
           ) : (
             <>
               {/* Details Panel - Stays in Sidebar */}
-              <div className="border border-slate-700 rounded overflow-hidden">
-                <div className="bg-slate-700 px-3 py-1 text-xs font-bold text-slate-300 uppercase">
+              <div className="border border-slate-800 rounded-lg overflow-hidden shadow-sm bg-slate-900/50">
+                <div className="bg-slate-800/50 px-4 py-2 text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-blue-500"></span>
                   Decision Context
                 </div>
-                <div className="bg-slate-900">
+                <div className="bg-slate-900/30">
                   <DetailsPanel decision={activeDecision} trade={activeTrade} />
                 </div>
               </div>
 
-              <div className="text-xs text-slate-500 text-center mt-2">
-                📊 {continuousData?.count?.toLocaleString() || 0} bars loaded<br />
-                📍 {decisions.length} decisions, {trades.length} trades
+              <div className="flex justify-between items-center text-[10px] text-slate-600 px-2 font-mono uppercase tracking-wider">
+                <span>📊 {continuousData?.count?.toLocaleString() || 0} bars</span>
+                <span>📍 {decisions.length} decisions / {trades.length} trades</span>
               </div>
             </>
           )}
@@ -277,11 +283,11 @@ const App: React.FC = () => {
       </div>
 
       {/* MAIN CONTENT - Vertical Layout */}
-      <div className="flex-1 flex flex-col min-w-0 h-full relative">
+      <div className="flex-1 flex flex-col min-w-0 h-full relative bg-slate-900">
 
         {/* Stats Panel (Moved Back to Top of Main Content) */}
         {currentRun && (
-          <div className="shrink-0 border-b border-slate-700 bg-slate-800">
+          <div className="shrink-0 border-b border-slate-800 bg-slate-900 z-10 shadow-sm">
             <StatsPanel decisions={decisions} startingBalance={50000} />
           </div>
         )}
@@ -298,13 +304,16 @@ const App: React.FC = () => {
 
           {/* Floating Info Overlay (Over Chart) */}
           {activeDecision && (
-            <div className="absolute top-4 left-4 bg-slate-800/80 backdrop-blur px-3 py-2 rounded border border-slate-700 text-xs shadow-lg pointer-events-none z-20">
-              <div className="font-mono text-white">{activeDecision?.timestamp}</div>
-              <div className="text-blue-400 font-bold">{activeDecision?.scanner_id || 'unknown'}</div>
-              <div className="text-slate-400">Index: {activeDecision?.index}</div>
+            <div className="absolute top-6 left-6 glass px-4 py-3 rounded-lg text-xs shadow-xl pointer-events-none z-20 min-w-[200px] animate-fade-in">
+              <div className="font-mono text-white text-sm font-semibold mb-1">{activeDecision?.timestamp}</div>
+              <div className="flex items-center justify-between mb-1">
+                 <div className="text-blue-400 font-bold uppercase tracking-wide">{activeDecision?.scanner_id || 'unknown'}</div>
+                 <div className="text-slate-500 font-mono">#{activeDecision?.index}</div>
+              </div>
+
               {activeDecision?.scanner_context?.direction && (
-                <div className={`font-bold ${activeDecision.scanner_context.direction === 'LONG' ? 'text-green-400' : 'text-red-400'}`}>
-                  {activeDecision.scanner_context.direction}
+                <div className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-bold border ${activeDecision.scanner_context.direction === 'LONG' ? 'bg-green-500/10 text-green-400 border-green-500/20' : 'bg-red-500/10 text-red-400 border-red-500/20'}`}>
+                  {activeDecision.scanner_context.direction === 'LONG' ? '↑' : '↓'} {activeDecision.scanner_context.direction}
                 </div>
               )}
             </div>
@@ -313,14 +322,14 @@ const App: React.FC = () => {
 
         {/* Resizer Handle */}
         <div
-          className="h-2 bg-slate-800 hover:bg-blue-600 cursor-row-resize shrink-0 flex items-center justify-center transition-colors border-y border-slate-700"
+          className="h-1 bg-slate-950 hover:bg-blue-500/50 cursor-row-resize shrink-0 flex items-center justify-center transition-all duration-300 border-y border-slate-800 relative group z-30"
           onMouseDown={startResizing}
         >
-          <div className="w-12 h-1 bg-slate-600 rounded-full" />
+          <div className="w-16 h-1 bg-slate-700 rounded-full group-hover:bg-blue-400 transition-colors opacity-50 group-hover:opacity-100" />
         </div>
 
         {/* Chat Bottom (Fixed Height) */}
-        <div style={{ height: chatHeight }} className="shrink-0 bg-slate-800">
+        <div style={{ height: chatHeight }} className="shrink-0 bg-slate-950 border-t border-slate-800 shadow-[0_-4px_20px_-5px_rgba(0,0,0,0.3)] z-20">
           <ChatAgent
             runId={currentRun || 'none'}
             currentIndex={index}

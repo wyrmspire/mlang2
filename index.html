@@ -5,12 +5,30 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Trade Viz Agent</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              slate: {
+                850: '#151e2e',
+                950: '#020617',
+              }
+            },
+            fontFamily: {
+              sans: ['Inter', 'sans-serif'],
+              mono: ['JetBrains Mono', 'monospace'],
+            }
+          }
+        }
+      }
+    </script>
     <style>
       body, html, #root {
         height: 100%;
         margin: 0;
-        background-color: #0f172a; /* slate-900 */
-        color: #e2e8f0; /* slate-200 */
+        background-color: #0b0e14;
+        color: #f1f5f9;
       }
     </style>
   <script type="importmap">
@@ -23,7 +41,6 @@
   }
 }
 </script>
-<link rel="stylesheet" href="/index.css">
 </head>
   <body>
     <div id="root"></div>
