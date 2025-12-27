@@ -111,65 +111,71 @@ export const StatsPanel: React.FC<StatsPanelProps> = ({
         return `${sign}$${val.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
     };
 
-    const StatBox = ({ label, value, color = 'text-white', subValue }: {
+    const StatBox = ({ label, value, color = 'text-white', subValue, trend }: {
         label: string;
         value: string | number;
         color?: string;
         subValue?: string;
+        trend?: 'up' | 'down' | 'neutral';
     }) => (
-        <div className="bg-slate-900/50 rounded px-3 py-2 flex flex-col">
-            <span className="text-[10px] text-slate-500 uppercase tracking-wide">{label}</span>
-            <span className={`text-sm font-bold ${color}`}>{value}</span>
-            {subValue && <span className="text-[10px] text-slate-400">{subValue}</span>}
+        <div className="bg-slate-800/40 backdrop-blur-sm border border-slate-700/50 rounded-lg p-3 flex flex-col hover:bg-slate-800/60 transition-colors shadow-sm group">
+            <span className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider mb-1">{label}</span>
+            <span className={`text-base font-bold font-mono ${color} group-hover:scale-105 transition-transform origin-left`}>{value}</span>
+            {subValue && (
+                <div className="flex items-center mt-1">
+                    <span className="text-[10px] text-slate-500 font-mono">{subValue}</span>
+                </div>
+            )}
         </div>
     );
 
     if (decisions.length === 0) {
         return (
-            <div className="p-3 bg-slate-800 border-b border-slate-700">
-                <div className="text-xs text-slate-500 text-center">No scan data loaded</div>
+            <div className="p-4 bg-slate-900 border-b border-slate-800">
+                <div className="text-sm text-slate-500 text-center italic">No scan data loaded to analyze.</div>
             </div>
         );
     }
 
     return (
-        <div className="p-3 bg-slate-800 border-b border-slate-700">
-            <div className="grid grid-cols-6 gap-2">
+        <div className="px-4 py-3 bg-slate-900 border-b border-slate-800 shadow-md z-10">
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
                 {/* Starting Balance */}
                 <StatBox
-                    label="Start"
+                    label="Initial Capital"
                     value={`$${startingBalance.toLocaleString()}`}
                     color="text-slate-300"
                 />
 
                 {/* End Balance */}
                 <StatBox
-                    label="End Balance"
+                    label="Current Balance"
                     value={`$${stats.endBalance.toLocaleString(undefined, { maximumFractionDigits: 0 })}`}
                     color={stats.endBalance >= startingBalance ? 'text-green-400' : 'text-red-400'}
+                    trend={stats.endBalance >= startingBalance ? 'up' : 'down'}
                 />
 
                 {/* Total P&L */}
                 <StatBox
-                    label="Total P&L"
+                    label="Net P&L"
                     value={formatCurrency(stats.totalPnL)}
                     color={stats.totalPnL >= 0 ? 'text-green-400' : 'text-red-400'}
-                    subValue={`${stats.totalTrades} trades`}
+                    subValue={`${stats.totalTrades} Trades`}
                 />
 
                 {/* Win Rate */}
                 <StatBox
                     label="Win Rate"
                     value={`${stats.winRate.toFixed(1)}%`}
-                    color={stats.winRate >= 50 ? 'text-green-400' : 'text-amber-400'}
-                    subValue={`${stats.wins}W / ${stats.losses}L`}
+                    color={stats.winRate >= 50 ? 'text-emerald-400' : 'text-amber-400'}
+                    subValue={`${stats.wins}W - ${stats.losses}L`}
                 />
 
                 {/* Max Drawdown */}
                 <StatBox
                     label="Max Drawdown"
                     value={`-$${stats.maxDrawdown.toLocaleString(undefined, { maximumFractionDigits: 0 })}`}
-                    color="text-red-400"
+                    color="text-rose-400"
                     subValue={`${((stats.maxDrawdown / startingBalance) * 100).toFixed(1)}%`}
                 />
 
@@ -177,7 +183,7 @@ export const StatsPanel: React.FC<StatsPanelProps> = ({
                 <StatBox
                     label="Profit Factor"
                     value={stats.profitFactor === Infinity ? '∞' : stats.profitFactor.toFixed(2)}
-                    color={stats.profitFactor >= 1 ? 'text-green-400' : 'text-red-400'}
+                    color={stats.profitFactor >= 1.5 ? 'text-purple-400' : stats.profitFactor >= 1 ? 'text-blue-400' : 'text-slate-400'}
                     subValue={`Avg: ${formatCurrency(stats.avgPnL)}`}
                 />
             </div>
