@@ -30,6 +30,7 @@ from src.core.tool_registry import ToolRegistry, ToolCategory
 # Import agent tools to register them
 import src.tools.agent_tools  # noqa: F401
 import src.tools.analysis_tools  # noqa: F401 - Registers analysis tools
+import src.tools.planning_tools  # noqa: F401 - Registers planning tools
 import src.core.strategy_tool  # noqa: F401 - Registers CompositeStrategyRunner
 import src.skills.indicator_skills  # noqa: F401 - Registers indicator tools
 import src.skills.data_skills  # noqa: F401 - Registers data tools
@@ -96,6 +97,7 @@ class UIAction(BaseModel):
 class AgentResponse(BaseModel):
     reply: str
     ui_action: Optional[UIAction] = None
+    ui_actions: List[UIAction] = []
 
 
 # =============================================================================
@@ -858,7 +860,7 @@ async def agent_chat(request: ChatRequest) -> AgentResponse:
             
             # Parse response
             reply_text = ""
-            ui_action = None
+            ui_actions: List[UIAction] = []
             
             if "candidates" in data and data["candidates"]:
                 parts = data["candidates"][0].get("content", {}).get("parts", [])
@@ -886,7 +888,7 @@ async def agent_chat(request: ChatRequest) -> AgentResponse:
                                     "tp_atr": fn_args.get("tp_atr", 3.0)
                                 }
                             }
-                            ui_action = UIAction(
+                            action = UIAction(
                                 type="RUN_STRATEGY",
                                 payload={
                                     "strategy": fn_args.get("strategy", "modular"),
@@ -896,25 +898,37 @@ async def agent_chat(request: ChatRequest) -> AgentResponse:
                                     "config": config
                                 }
                             )
-                            reply_text = f"Running {fn_args.get('trigger_type', 'modular')} strategy scan from {fn_args.get('start_date')} for {fn_args.get('weeks')} week(s)..."
+                            ui_actions.append(action)
+                            reply_text += f"\nRunning {fn_args.get('trigger_type', 'modular')} strategy scan from {fn_args.get('start_date')} for {fn_args.get('weeks')} week(s)..."
                         
                         elif fn_name == "set_index":
-                            ui_action = UIAction(type="SET_INDEX", payload=fn_args.get("index", 0))
-                            reply_text = f"Navigating to index {fn_args.get('index')}."
+                            action = UIAction(type="SET_INDEX", payload=fn_args.get("index", 0))
+                            ui_actions.append(action)
+                            reply_text += f"\nNavigating to index {fn_args.get('index')}."
                         
                         elif fn_name == "set_mode":
-                            ui_action = UIAction(type="SET_MODE", payload=fn_args.get("mode", "DECISION"))
-                            reply_text = f"Switching to {fn_args.get('mode')} view."
+                            action = UIAction(type="SET_MODE", payload=fn_args.get("mode", "DECISION"))
+                            ui_actions.append(action)
+                            reply_text += f"\nSwitching to {fn_args.get('mode')} view."
                         
                         elif fn_name == "load_run":
-                            ui_action = UIAction(type="LOAD_RUN", payload=fn_args.get("run_id"))
-                            reply_text = f"Loading run: {fn_args.get('run_id')}"
+                            action = UIAction(type="LOAD_RUN", payload=fn_args.get("run_id"))
+                            ui_actions.append(action)
+                            reply_text += f"\nLoading run: {fn_args.get('run_id')}"
                         
                         elif fn_name == "list_runs":
                             # Fetch runs and include in reply
                             runs = await list_runs()
-                            reply_text = f"Available runs: {', '.join(runs[:10])}" + (" ..." if len(runs) > 10 else "")
+                            reply_text += f"\nAvailable runs: {', '.join(runs[:10])}" + (" ..." if len(runs) > 10 else "")
                         
+                        elif fn_name == "CreatePlanTool":
+                             # Just display the plan
+                             steps = fn_args.get("steps", [])
+                             goal = fn_args.get("goal", "Plan")
+                             reply_text += f"\n**PLAN: {goal}**\n"
+                             for i, step in enumerate(steps, 1):
+                                 reply_text += f"{i}. {step}\n"
+
                         else:
                             # Try to execute via ToolRegistry (for tools like get_dataset_summary, check_ema_cross, etc.)
                             try:
@@ -923,11 +937,11 @@ async def agent_chat(request: ChatRequest) -> AgentResponse:
                                 if result is not None:
                                     import json
                                     result_str = json.dumps(result, indent=2, default=str)[:1500]
-                                    reply_text = f"**{fn_name} result:**\n```json\n{result_str}\n```"
+                                    reply_text += f"\n**{fn_name} result:**\n```json\n{result_str}\n```"
                                 else:
-                                    reply_text = f"Tool `{fn_name}` returned no result."
+                                    reply_text += f"\nTool `{fn_name}` returned no result."
                             except Exception as e:
-                                reply_text = f"Error executing tool `{fn_name}`: {str(e)}"
+                                reply_text += f"\nError executing tool `{fn_name}`: {str(e)}"
                     
                     # Check for text response
                     elif "text" in part:
@@ -936,10 +950,10 @@ async def agent_chat(request: ChatRequest) -> AgentResponse:
             if not reply_text:
                 reply_text = "I'm ready to help. What would you like to do?"
             
-            if ui_action:
-                print(f"[AGENT] Returning action: {ui_action.type}")
+            if ui_actions:
+                print(f"[AGENT] Returning {len(ui_actions)} actions")
             
-            return AgentResponse(reply=reply_text, ui_action=ui_action)
+            return AgentResponse(reply=reply_text, ui_action=ui_actions[-1] if ui_actions else None, ui_actions=ui_actions)
             
         except httpx.HTTPError as e:
             print(f"[AGENT] HTTP Error: {e}")

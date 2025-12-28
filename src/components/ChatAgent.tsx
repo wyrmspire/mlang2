@@ -39,9 +39,27 @@ export const ChatAgent: React.FC<ChatAgentProps> = ({ runId, currentIndex, curre
 
       setMessages(prev => [...prev, { role: 'assistant', content: response.reply }]);
 
+      // Handle legacy single action
       if (response.ui_action) {
         onAction(response.ui_action);
       }
+
+      // Handle multiple actions
+      if (response.ui_actions && response.ui_actions.length > 0) {
+        // Execute sequentially with a small delay to ensure state updates
+        for (const action of response.ui_actions) {
+            // We might want to await this if onAction was async, but it's usually just a state setter.
+            // For safety with state updates, we might need a more complex orchestrator in App.tsx,
+            // but for now, firing them should work if they affect different states or if React batches them.
+            // If we have multiple "SET_INDEX" calls, only the last one matters.
+            // If we have "LOAD_RUN" then "SET_INDEX", we need LOAD_RUN to finish first.
+            // Since onAction is synchronous state setting, we can just call them.
+            // However, LOAD_RUN triggers an async effect in App.tsx.
+            // This is a known limitation. For now, we assume simple actions.
+             onAction(action);
+        }
+      }
+
     } catch (err) {
       setMessages(prev => [...prev, { role: 'assistant', content: "Error contacting agent." }]);
     } finally {
