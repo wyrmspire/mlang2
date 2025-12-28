@@ -206,6 +206,21 @@ class ToolRegistry:
         return cls._registry[tool_id](**params)
     
     @classmethod
+    def get_tool(cls, tool_id: str) -> ToolProtocol:
+        """
+        Get a tool instance by ID (no params, for dynamic execution).
+        
+        Args:
+            tool_id: Tool identifier
+        
+        Returns:
+            Tool instance or None if not found
+        """
+        if tool_id not in cls._registry:
+            return None
+        return cls._registry[tool_id]()
+    
+    @classmethod
     def get_info(cls, tool_id: str) -> ToolInfo:
         """Get metadata for a specific tool."""
         if tool_id not in cls._info:

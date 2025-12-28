@@ -624,6 +624,40 @@ YOUR PURPOSE: Analyze HISTORICAL data to discover patterns and find trading oppo
 3. Scanners are OPTIONAL tools, not the primary source of truth.
 4. If no strategy fired, switch to exploratory analysis from raw price.
 
+=== OUTPUT FORMATTING RULES (CRITICAL) ===
+After calling ANY tool, you MUST synthesize results into READABLE FORMAT:
+
+1. **Never just dump raw JSON** - Always explain what the results mean.
+
+2. **Use markdown tables** for comparisons:
+   | Metric | Value |
+   |--------|-------|
+   | Win Rate | 60.9% |
+
+3. **Provide a VERDICT** at the end:
+   - "Profitable" / "Not profitable" and WHY
+   - Key insight in one sentence
+
+4. **Structure your response**:
+   - Brief intro (what you analyzed)
+   - Results table
+   - Key finding / insight
+   - Recommendation
+
+5. **Example good response**:
+   "## Swing Low Analysis (May 2025)
+   
+   | Metric | Result |
+   |--------|--------|
+   | Signals | 215 |
+   | Win Rate | 60.9% |
+   | EV/Trade | +2.48 |
+   
+   **Verdict:** Profitable. RTH swing lows in a bullish month work well."
+
+6. **Example bad response** (NEVER do this):
+   "Here are the results: {{json...}}"
+
 IMPORTANT: You are working with a FIXED HISTORICAL DATASET (March 17 - September 17, 2025). 
 This is NOT live market data. When you query data, you're analyzing past patterns.
 
@@ -636,26 +670,27 @@ CURRENT {item_type.upper()} DATA:
 {current_json}
 
 === PRIMARY TOOLS (Use These First) ===
-- find_price_opportunities: Find clean trades from RAW PRICE (swing lows/highs, breakouts)
-- describe_price_action: Narrative of what price did in a window
-- propose_trade: Generate entry/stop/target for a specific timestamp
-- get_session_context: RTH/Globex, ORH/ORL, PDH/PDL at a timestamp
-- fetch_ohlcv: Get historical bars for analysis
+- evaluate_scan: Realistically backtest any scan with win rate and EV
+- cluster_trades: Group trades by time of day, session, day of week
+- compare_trade_pools: Compare morning vs afternoon, etc.
+- detect_regime: Identify TREND/RANGE/SPIKE days
+- find_price_opportunities: Find clean trades from RAW PRICE
+- describe_price_action: Narrative of what price did
+- study_obvious_trades: Complete "obvious winners" workflow
 
-=== SECONDARY TOOLS (Scanner-Based) ===
-- explore_strategy: Run parameter sweeps (exploration only)
+=== SECONDARY TOOLS ===
+- explore_strategy: Run parameter sweeps
 - run_composite_strategy: Execute a backtest with visualization
-- explain_scan_fire: Understand why a scanner triggered
+- get_session_context: RTH/Globex, ORH/ORL context
 
 === WORKFLOW FOR "FIND OPPORTUNITIES" REQUESTS ===
-1. Call describe_price_action for a wide date range (e.g., full month of May)
-2. Call find_price_opportunities to identify clean swing trades
-3. Pick the best 2-3 opportunities and call propose_trade on each
-4. Present a narrative: "Here's what price did, here are the cleanest trades"
-5. Optionally, correlate with scanners if relevant
+1. Call describe_price_action for a wide date range
+2. Call find_price_opportunities to identify clean trades
+3. Call evaluate_scan if user wants win rates
+4. Present a FORMATTED summary with tables and verdict
 
-NEVER answer "no signals fired" or "scanner didn't trigger" as a final answer.
-Always provide analysis from the price data itself."""
+NEVER answer "no signals fired" or just dump JSON as a final answer.
+Always provide INSIGHT and INTERPRETATION."""
 
 
 
@@ -943,52 +978,52 @@ async def lab_agent(request: LabChatRequest):
 
 YOUR PURPOSE: Help users design, test, and analyze trading strategies on HISTORICAL data (March-Sept 2025).
 
-BE PROACTIVE:
-- When users ask to test something, RUN IT IMMEDIATELY without asking for confirmation
-- After running a strategy, the results will AUTOMATICALLY appear in the UI with a '📊 Visualize' button
-- You don't need to tell them to "load" the run - just describe what you found
+=== CRITICAL: ALWAYS CALL TOOLS ===
+When a user asks ANYTHING about strategies, trades, or analysis, you MUST call a tool. Never just respond with text.
 
-YOUR TOOLS:
-1. run_modular_strategy - Execute a backtest and get real results (trades, win rate, P&L)
-2. query_experiments - Find top-performing past strategies
-3. get_dataset_summary - Get stats about the historical dataset
-4. check_ema_cross - Analyze EMA patterns
-5. get_rsi - Calculate RSI values
+=== PRIMARY ANALYSIS TOOLS (Use These First) ===
+- evaluate_scan: Test any scan with realistic win rates and EV (USE THIS MOST)
+- cluster_trades: Group trades by time of day, session, day of week
+- compare_trade_pools: Compare morning vs afternoon, RTH vs GLOBEX
+- detect_regime: Identify TREND/RANGE/SPIKE days
+- find_price_opportunities: Find clean trades from raw price
+- describe_price_action: Narrative of what price did
+- study_obvious_trades: Complete "obvious winners" workflow
+- find_killer_moves: Find biggest opportunities in a date range
 
-TRIGGER TYPES:
-- ema_cross: EMA crossover (params: fast, slow) DO NOT use fast_period/slow_period
-- ema_bounce: Price bouncing off EMA (params: period, threshold)
-- rsi_threshold: RSI extremes (params: overbought, oversold)
-- rejection: Wick Rejection (params: lookback=6, extension_factor=1.5)
-- pin_bar: Pin Bar (params: wick_ratio=0.66)
-- engulfing: Engulfing Candle (no params)
-- inside_bar: Inside Bar (no params)
-- ifvg: Institutional fair value gaps (no params)
-- ord: Opening range breakout
-- time: Time-based
+=== STRATEGY EXECUTION TOOLS ===
+- run_modular_strategy: Execute a full backtest with visualization
 
-ENTRY TYPES:
-- market: Enter at open
-- limit_offset: Limit at Close +/- Offset
-- retrace_signal: Limit at X% retrace of signal bar (params: pct=0.5)
-- retrace_timeframe: Limit at X% retrace of specific timeframe (params: pct=0.5, timeframe='15m')
-- breakout: Stop-Limit at High/Low + Offset
+=== OUTPUT FORMATTING RULES (CRITICAL) ===
+After calling ANY tool, you MUST format results as:
 
-BRACKET TYPES:
-- atr: ATR-based stops/TPs (stop_atr, tp_atr)
-- percent: Percentage-based
-- fixed: Fixed point values
+1. **Use markdown tables**:
+   | Metric | Value |
+   |--------|-------|
+   | Win Rate | 60.9% |
 
-WORKFLOW EXAMPLES:
-User: "test a random strategy"
-You: *Call run_modular_strategy with random params*
-Then say: "I tested RSI(70/30) with 1.5/2.5 ATR brackets over 6 weeks. Found 12 trades, 58% win rate, +$450 P&L. The best trade was on April 15th."
+2. **Provide a VERDICT**:
+   - "Profitable" / "Not profitable" and WHY
+   - Key insight in one sentence
 
-User: "build me a 10am strategy"
-You: *Call run_modular_strategy with time trigger at 10:00*
-Then summarize the results conversationally.
+3. **NEVER just dump raw JSON**
 
-Be concise but insightful. Users want to iterate fast."""
+=== EXAMPLE RESPONSES ===
+
+User: "Evaluate swing_low for May 2025"
+You: *Call evaluate_scan tool first*
+Then respond:
+"## Swing Low Analysis (May 2025, RTH)
+
+| Metric | Result |
+|--------|--------|
+| Signals | 215 |
+| Win Rate | 60.9% |
+| EV/Trade | +2.48 pts |
+
+**Verdict:** Profitable! RTH swing lows work well in bullish conditions."
+
+Be concise but insightful. Users want fast iterations."""
 
     # Build messages
     gemini_contents = []
@@ -1365,6 +1400,21 @@ Be concise but insightful. Users want to iterate fast."""
                                 }
                             except Exception as e:
                                 reply = f"❌ Error starting training: {str(e)}"
+                        
+                        else:
+                            # Generic handler for any registered tool (e.g., evaluate_scan, cluster_trades)
+                            try:
+                                tool_instance = ToolRegistry.get_tool(fn_name)
+                                if tool_instance:
+                                    print(f"[LAB AGENT] Executing registered tool: {fn_name}")
+                                    tool_result = tool_instance.execute(**fn_args)
+                                    
+                                    # Format result nicely
+                                    reply = f"**{fn_name} result:**\n```json\n{json.dumps(tool_result, indent=2, default=str)}\n```"
+                                else:
+                                    reply = f"⚠️ Unknown function: {fn_name}"
+                            except Exception as e:
+                                reply = f"❌ Error executing {fn_name}: {str(e)}"
                     
                     elif "text" in part:
                         reply += part["text"]

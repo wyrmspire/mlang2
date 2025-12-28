@@ -168,7 +168,7 @@ export const LabPage: React.FC<LabPageProps> = ({ onLoadRun }) => {
             <div key={idx} className="flex justify-start">
                 <div className="max-w-[90%]">
                     <div className="bg-slate-700 text-slate-100 rounded-xl px-4 py-3">
-                        <div className="prose prose-sm prose-invert max-w-none prose-p:my-1 prose-ul:my-1 prose-ol:my-1 prose-li:my-0 prose-headings:my-2 prose-headings:text-blue-400 prose-code:bg-slate-600 prose-code:px-1 prose-code:rounded prose-pre:bg-slate-800 prose-pre:border prose-pre:border-slate-600 prose-strong:text-white">
+                        <div className="prose prose-sm prose-invert max-w-none prose-p:my-1 prose-ul:my-1 prose-ol:my-1 prose-li:my-0 prose-headings:my-2 prose-headings:text-blue-400 prose-code:bg-slate-600 prose-code:px-1 prose-code:rounded prose-pre:bg-slate-800 prose-pre:border prose-pre:border-slate-600 prose-strong:text-white prose-table:border-collapse prose-th:bg-slate-700 prose-th:border prose-th:border-slate-600 prose-th:px-3 prose-th:py-2 prose-td:border prose-td:border-slate-600 prose-td:px-3 prose-td:py-2 prose-tr:even:bg-slate-800/50">
                             <ReactMarkdown>{msg.content}</ReactMarkdown>
                         </div>
                     </div>

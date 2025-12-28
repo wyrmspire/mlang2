@@ -51,6 +51,27 @@ See [REPLAY_MODE.md](docs/REPLAY_MODE.md) for detailed usage guide.
 - Compare multiple strategy configurations
 - Track best performing setups
 
+### 🤖 Agent Architecture
+
+There are **two agents** with different purposes:
+
+| | Agent 1 (TradeViz) | Agent 2 (Lab/Brainstormer) |
+|---|---|---|
+| **Endpoint** | `/agent/chat` | `/lab/agent` |
+| **Purpose** | Create full TradeViz visualizations | Fast analysis & brainstorming |
+| **Mode** | Full mode (creates viz files) | Light mode (no viz files) |
+| **Speed** | Slower (processes full dataset) | Fast (targeted queries) |
+| **Tools** | `run_modular_strategy` | `evaluate_scan`, `cluster_trades`, etc. |
+
+**Terminal Debugging:**
+```bash
+# Chat with Lab Agent (fast brainstorming)
+python scripts/agent_chat.py --agent lab
+
+# Chat with TradeViz Agent (full strategies)
+python scripts/agent_chat.py --agent tradeviz
+```
+
 ## Run Locally
 
 **Prerequisites:** Node.js and Python 3.10+

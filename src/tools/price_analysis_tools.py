@@ -1219,3 +1219,294 @@ class ScanSynthesizerTool:
             "usage": "Feed this spec to explore_strategy for validation"
         }
 
+
+# =============================================================================
+# Reusable Scan Filters
+# =============================================================================
+
+def filter_by_session(signals_df: pd.DataFrame, session: str = "RTH") -> pd.DataFrame:
+    """Filter signals to only include RTH or GLOBEX.
+    
+    Args:
+        signals_df: DataFrame with 'time' column
+        session: "RTH" (9:30-16:00) or "GLOBEX" (all other hours)
+    
+    Returns:
+        Filtered DataFrame
+    """
+    df = signals_df.copy()
+    df['_hour'] = pd.to_datetime(df['time']).dt.hour
+    
+    if session == "RTH":
+        mask = (df['_hour'] >= 9) & (df['_hour'] < 16)
+    else:
+        mask = (df['_hour'] < 9) | (df['_hour'] >= 16)
+    
+    return df[mask].drop(columns=['_hour'])
+
+
+def filter_by_prevolatility(signals_df: pd.DataFrame, 
+                            full_df: pd.DataFrame,
+                            threshold: float = 4.8,
+                            lookback_bars: int = 6,
+                            above: bool = True) -> pd.DataFrame:
+    """Filter signals by pre-entry volatility.
+    
+    Args:
+        signals_df: DataFrame with signal rows
+        full_df: Full price DataFrame for lookback
+        threshold: Volatility threshold (pts/bar)
+        lookback_bars: How many bars to look back
+        above: If True, keep signals where pre-vol >= threshold
+    
+    Returns:
+        Filtered DataFrame
+    """
+    keep_indices = []
+    
+    for idx in signals_df.index:
+        if idx < lookback_bars:
+            continue
+        
+        pre_bars = full_df.iloc[idx-lookback_bars:idx]
+        pre_vol = (pre_bars['high'] - pre_bars['low']).mean()
+        
+        if above and pre_vol >= threshold:
+            keep_indices.append(idx)
+        elif not above and pre_vol < threshold:
+            keep_indices.append(idx)
+    
+    return signals_df.loc[keep_indices]
+
+
+def filter_by_regime(signals_df: pd.DataFrame,
+                     full_df: pd.DataFrame,
+                     regime: str = "TREND") -> pd.DataFrame:
+    """Filter signals by day regime (TREND or RANGE).
+    
+    Args:
+        signals_df: DataFrame with signal rows
+        full_df: Full price DataFrame
+        regime: "TREND" or "RANGE"
+    """
+    keep_indices = []
+    
+    for idx in signals_df.index:
+        date = full_df.loc[idx, 'time'].date()
+        day_data = full_df[full_df['time'].dt.date == date]
+        
+        if len(day_data) < 10:
+            continue
+        
+        day_open = float(day_data['open'].iloc[0])
+        day_close = float(day_data['close'].iloc[-1])
+        day_range = float(day_data['high'].max() - day_data['low'].min())
+        
+        net_pct = abs(day_close - day_open) / day_open * 100
+        
+        is_trend = net_pct > 0.5
+        
+        if regime == "TREND" and is_trend:
+            keep_indices.append(idx)
+        elif regime == "RANGE" and not is_trend:
+            keep_indices.append(idx)
+    
+    return signals_df.loc[keep_indices]
+
+
+# =============================================================================
+# Scan Evaluation Tool
+# =============================================================================
+
+@ToolRegistry.register(
+    tool_id="evaluate_scan",
+    category=ToolCategory.UTILITY,
+    name="Evaluate Scan",
+    description="Realistically backtest any scan with proper stops, entry at close, and win rate breakdown by session/volatility.",
+    input_schema={
+        "type": "object",
+        "properties": {
+            "start_date": {"type": "string", "description": "Start date YYYY-MM-DD"},
+            "end_date": {"type": "string", "description": "End date YYYY-MM-DD"},
+            "scan_type": {
+                "type": "string",
+                "enum": ["swing_low", "swing_high", "ema_cross"],
+                "default": "swing_low"
+            },
+            "direction": {
+                "type": "string",
+                "enum": ["LONG", "SHORT"],
+                "default": "LONG"
+            },
+            "tp_points": {"type": "number", "default": 6.0, "description": "Take profit in points"},
+            "sl_points": {"type": "number", "default": 3.0, "description": "Stop loss in points"},
+            "filters": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Filters to apply: 'rth_only', 'high_volatility', 'trend_days'",
+                "default": []
+            }
+        },
+        "required": ["start_date", "end_date"]
+    }
+)
+class ScanEvaluationTool:
+    """Realistically evaluate any scan."""
+    
+    def execute(self, **inputs) -> Dict[str, Any]:
+        start_date = inputs.get("start_date")
+        end_date = inputs.get("end_date")
+        scan_type = inputs.get("scan_type", "swing_low")
+        direction = inputs.get("direction", "LONG")
+        tp_points = inputs.get("tp_points", 6.0)
+        sl_points = inputs.get("sl_points", 3.0)
+        filters = inputs.get("filters", [])
+        
+        # Load and resample data
+        df = load_continuous_contract(start_date=start_date, end_date=end_date)
+        if df.empty:
+            return {"error": "No data"}
+        
+        df = df.set_index('time').resample('5min').agg({
+            'open': 'first', 'high': 'max', 'low': 'min', 'close': 'last', 'volume': 'sum'
+        }).dropna().reset_index()
+        
+        # Generate scan signals
+        if scan_type == "swing_low":
+            df['signal'] = (
+                (df['low'] < df['low'].shift(1)) &
+                (df['low'] < df['low'].shift(2)) &
+                (df['low'] < df['low'].shift(-1)) &
+                (df['low'] < df['low'].shift(-2))
+            )
+        elif scan_type == "swing_high":
+            df['signal'] = (
+                (df['high'] > df['high'].shift(1)) &
+                (df['high'] > df['high'].shift(2)) &
+                (df['high'] > df['high'].shift(-1)) &
+                (df['high'] > df['high'].shift(-2))
+            )
+        elif scan_type == "ema_cross":
+            df['ema9'] = df['close'].ewm(span=9).mean()
+            df['ema21'] = df['close'].ewm(span=21).mean()
+            if direction == "LONG":
+                df['signal'] = (df['ema9'] > df['ema21']) & (df['ema9'].shift(1) <= df['ema21'].shift(1))
+            else:
+                df['signal'] = (df['ema9'] < df['ema21']) & (df['ema9'].shift(1) >= df['ema21'].shift(1))
+        
+        signals_df = df[df['signal']].copy()
+        
+        # Apply filters
+        if "rth_only" in filters:
+            signals_df = filter_by_session(signals_df, "RTH")
+        if "globex_only" in filters:
+            signals_df = filter_by_session(signals_df, "GLOBEX")
+        if "high_volatility" in filters:
+            signals_df = filter_by_prevolatility(signals_df, df, threshold=4.8, above=True)
+        if "low_volatility" in filters:
+            signals_df = filter_by_prevolatility(signals_df, df, threshold=4.8, above=False)
+        if "trend_days" in filters:
+            signals_df = filter_by_regime(signals_df, df, "TREND")
+        if "range_days" in filters:
+            signals_df = filter_by_regime(signals_df, df, "RANGE")
+        
+        # Evaluate each signal
+        results = []
+        for idx in signals_df.index:
+            if idx + 30 >= len(df) or idx < 6:
+                continue
+            
+            entry = float(df.loc[idx, 'close'])
+            
+            if direction == "LONG":
+                target = entry + tp_points
+                stop = entry - sl_points
+            else:
+                target = entry - tp_points
+                stop = entry + sl_points
+            
+            # Get context
+            pre_bars = df.iloc[max(0, idx-6):idx]
+            pre_vol = (pre_bars['high'] - pre_bars['low']).mean() if len(pre_bars) > 0 else 0
+            hour = df.loc[idx, 'time'].hour
+            session = "RTH" if 9 <= hour < 16 else "GLOBEX"
+            
+            # Find outcome
+            outcome = "TIMEOUT"
+            bars_held = 30
+            
+            for i in range(idx + 1, min(idx + 31, len(df))):
+                bar = df.iloc[i]
+                
+                if direction == "LONG":
+                    if bar['low'] <= stop:
+                        outcome = "LOSS"
+                        bars_held = i - idx
+                        break
+                    if bar['high'] >= target:
+                        outcome = "WIN"
+                        bars_held = i - idx
+                        break
+                else:
+                    if bar['high'] >= stop:
+                        outcome = "LOSS"
+                        bars_held = i - idx
+                        break
+                    if bar['low'] <= target:
+                        outcome = "WIN"
+                        bars_held = i - idx
+                        break
+            
+            results.append({
+                "outcome": outcome,
+                "session": session,
+                "hour": hour,
+                "pre_vol": pre_vol,
+                "bars_held": bars_held
+            })
+        
+        if not results:
+            return {"error": "No signals after filtering"}
+        
+        # Aggregate results
+        rdf = pd.DataFrame(results)
+        wins = rdf[rdf['outcome'] == 'WIN']
+        losses = rdf[rdf['outcome'] == 'LOSS']
+        timeouts = rdf[rdf['outcome'] == 'TIMEOUT']
+        
+        total = len(rdf)
+        win_rate = len(wins) / total * 100 if total > 0 else 0
+        
+        # Expected value calculation
+        avg_win = tp_points
+        avg_loss = sl_points
+        ev = (win_rate/100 * avg_win) - ((100-win_rate)/100 * avg_loss)
+        
+        # Session breakdown
+        session_stats = {}
+        for sess in ["RTH", "GLOBEX"]:
+            subset = rdf[rdf['session'] == sess]
+            if len(subset) > 0:
+                sess_wins = len(subset[subset['outcome'] == 'WIN'])
+                session_stats[sess] = {
+                    "signals": len(subset),
+                    "win_rate": round(sess_wins / len(subset) * 100, 1)
+                }
+        
+        return {
+            "scan_type": scan_type,
+            "direction": direction,
+            "tp_sl": f"{tp_points}/{sl_points}",
+            "filters_applied": filters,
+            "total_signals": total,
+            "wins": len(wins),
+            "losses": len(losses),
+            "timeouts": len(timeouts),
+            "win_rate": round(win_rate, 1),
+            "expected_value_per_trade": round(ev, 2),
+            "profitable": ev > 0,
+            "session_breakdown": session_stats,
+            "avg_bars_held": round(rdf['bars_held'].mean(), 1)
+        }
+
+

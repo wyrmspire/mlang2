@@ -58,6 +58,19 @@ class MarketStepper:
     def reset(self, start_idx: Optional[int] = None):
         """Reset stepper to start position."""
         self.current_idx = start_idx if start_idx is not None else self.start_idx
+
+    def skip_to(self, target_idx: int):
+        """
+        Fast forward to a specific index.
+        
+        Args:
+            target_idx: Target bar index. Must be >= current_idx.
+        """
+        if target_idx < self.current_idx:
+            # Can't go back
+            return
+        
+        self.current_idx = min(target_idx, self.end_idx)
     
     def step(self) -> StepResult:
         """

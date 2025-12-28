@@ -78,6 +78,9 @@ class ExperimentResult:
         }
 
 
+from src.experiments.fast_forward import EventScheduler
+
+
 def run_experiment(
     config: ExperimentConfig,
     exporter: Optional['Exporter'] = None
@@ -195,6 +198,26 @@ def run_experiment(
     stepper = MarketStepper(df, start_idx=decision_start_idx, end_idx=decision_end_idx)
     scanner = get_scanner(config.scanner_id, **config.scanner_params)
     
+    # ========================================
+    # FAST FORWARD PRE-SCAN
+    # ========================================
+    event_indices = None
+    recipe = None
+    if isinstance(config.scanner_params, dict) and 'entry_trigger' in config.scanner_params:
+         recipe = config.scanner_params
+    
+    if recipe:
+        print("[FastForward] Pre-scanning for events...")
+        event_indices = EventScheduler.get_events(df, recipe)
+        
+        if event_indices is not None:
+            # Filter valid range
+            event_indices = sorted([i for i in event_indices if decision_start_idx <= i < decision_end_idx])
+            print(f"[FastForward] Optimized: {len(event_indices)} potential events found. Skipping empty periods.")
+    
+    event_ptr = 0
+    # ========================================
+
     # CRITICAL: Ensure labeler uses the SAME oco_config as viz export
     # Otherwise bars_held will mismatch the displayed TP/SL levels
     label_config = config.label_config
@@ -221,6 +244,20 @@ def run_experiment(
     records: List[DecisionRecord] = []
     
     while True:
+        # Fast Forward Logic
+        if event_indices and not executor.active_brackets:
+            # If no open trades, we can safely jump to next event
+            current = stepper.current_idx
+            
+            # Find next event >= current
+            while event_ptr < len(event_indices) and event_indices[event_ptr] < current:
+                event_ptr += 1
+            
+            if event_ptr < len(event_indices):
+                next_event_idx = event_indices[event_ptr]
+                if next_event_idx > current:
+                    stepper.skip_to(next_event_idx)
+        
         # Step the unified executor
         result = executor.step()
         if not result:

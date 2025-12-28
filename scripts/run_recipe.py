@@ -113,6 +113,7 @@ def main():
     config = ExperimentConfig(
         name=args.out,
         scanner_id=scanner.scanner_id,
+        scanner_params=recipe,  # Pass recipe for Fast Forward
         start_date=start_date, 
         end_date=end_date,
         timeframe="1m",
