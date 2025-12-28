@@ -126,7 +126,7 @@ export const api = {
 
     postAgent: async (
         messages: ChatMessage[],
-        context: { runId: string, currentIndex: number, currentMode: 'DECISION' | 'TRADE' }
+        context: { runId: string, currentIndex: number, currentMode: 'DECISION' | 'TRADE', fastVizMode?: boolean }
     ): Promise<AgentResponse> => {
         const hasBackend = await checkBackend();
         if (!hasBackend) {

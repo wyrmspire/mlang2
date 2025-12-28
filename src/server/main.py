@@ -107,6 +107,7 @@ class ChatContext(BaseModel):
     runId: str
     currentIndex: int
     currentMode: str  # 'DECISION' or 'TRADE'
+    fastVizMode: bool = False  # When True, agent emits RUN_FAST_VIZ instead of RUN_STRATEGY
 
 
 class ChatRequest(BaseModel):
@@ -922,17 +923,42 @@ async def agent_chat(request: ChatRequest) -> AgentResponse:
                                     "tp_atr": fn_args.get("tp_atr", 3.0)
                                 }
                             }
-                            ui_action = UIAction(
-                                type="RUN_STRATEGY",
-                                payload={
-                                    "strategy": fn_args.get("strategy", "modular"),
-                                    "start_date": fn_args.get("start_date", "2025-03-18"),
-                                    "weeks": fn_args.get("weeks", 1),
-                                    "run_name": fn_args.get("run_name"),
-                                    "config": config
-                                }
-                            )
-                            reply_text = f"Running {fn_args.get('trigger_type', 'modular')} strategy scan from {fn_args.get('start_date')} for {fn_args.get('weeks')} week(s)..."
+                            
+                            # Check if Fast Viz mode is enabled
+                            fast_viz_enabled = request.context.fastVizMode if hasattr(request.context, 'fastVizMode') else False
+                            
+                            if fast_viz_enabled:
+                                # Emit RUN_FAST_VIZ for instant ideation
+                                from datetime import timedelta
+                                import pandas as pd
+                                start_date = fn_args.get('start_date', '2025-05-01')
+                                weeks = fn_args.get('weeks', 2)
+                                start_dt = pd.to_datetime(start_date)
+                                end_dt = start_dt + timedelta(weeks=weeks)
+                                
+                                ui_action = UIAction(
+                                    type="RUN_FAST_VIZ",
+                                    payload={
+                                        "config": config,
+                                        "start_date": start_date,
+                                        "end_date": end_dt.strftime("%Y-%m-%d"),
+                                        "run_name": fn_args.get('run_name')
+                                    }
+                                )
+                                reply_text = f"⚡ Fast Viz: {fn_args.get('trigger_type', 'modular')} strategy from {start_date} ({weeks} week(s)). Results are approximate - click 💾 to verify with full simulation."
+                            else:
+                                # Normal full simulation
+                                ui_action = UIAction(
+                                    type="RUN_STRATEGY",
+                                    payload={
+                                        "strategy": fn_args.get("strategy", "modular"),
+                                        "start_date": fn_args.get("start_date", "2025-03-18"),
+                                        "weeks": fn_args.get("weeks", 1),
+                                        "run_name": fn_args.get("run_name"),
+                                        "config": config
+                                    }
+                                )
+                                reply_text = f"Running {fn_args.get('trigger_type', 'modular')} strategy scan from {fn_args.get('start_date')} for {fn_args.get('weeks')} week(s)..."
                         
                         elif fn_name == "set_index":
                             ui_action = UIAction(type="SET_INDEX", payload=fn_args.get("index", 0))

@@ -209,10 +209,21 @@ async def save_fast_viz_run(run_id: str):
             "--end-date", result.end_date
         ]
         
-        subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        print(f"[FAST_VIZ] Promoting {run_id} to full simulation: {' '.join(cmd)}")
+        proc_result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
         
-        # Remove from ephemeral cache
+        # Check if the subprocess succeeded
+        if proc_result.returncode != 0:
+            error_msg = proc_result.stderr or proc_result.stdout or "Unknown error"
+            print(f"[FAST_VIZ] Promotion failed: {error_msg}")
+            raise HTTPException(
+                status_code=500, 
+                detail=f"Full simulation failed: {error_msg[:500]}"
+            )
+        
+        # Only remove from ephemeral cache AFTER successful promotion
         del _fast_viz_runs[run_id]
+        print(f"[FAST_VIZ] Successfully promoted {run_id} -> {new_run_id}")
         
         return {
             "success": True,
@@ -221,7 +232,12 @@ async def save_fast_viz_run(run_id: str):
             "message": "Promoted to full simulation with viz artifacts"
         }
         
+    except subprocess.TimeoutExpired:
+        raise HTTPException(status_code=500, detail="Full simulation timed out after 5 minutes")
+    except HTTPException:
+        raise  # Re-raise HTTP exceptions as-is
     except Exception as e:
+        print(f"[FAST_VIZ] Exception during promotion: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to save: {str(e)}")
     finally:
         try:

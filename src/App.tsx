@@ -456,6 +456,7 @@ const App: React.FC = () => {
             runId={currentRun || 'none'}
             currentIndex={index}
             currentMode={mode}
+            fastVizMode={fastVizEnabled}
             onAction={handleAgentAction}
           />
         </div>
