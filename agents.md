@@ -26,6 +26,34 @@ Models annotate decisions; they do not “decide trades” autonomously
 
 This prevents Jules from “optimizing” the wrong things.
 
+## Price-First Behavior (CRITICAL)
+
+> **RULE: Analyze RAW PRICE first, not scanner signals.**
+
+### Guardrails
+1. **Never say "no scanner fired" as a final answer.** If no strategy triggered, analyze raw price.
+2. **Default to wide date ranges.** If user says "around May 12", load May 1-31, not just that day.
+3. **Primary tools are price-based:**
+   - `find_price_opportunities` - Find clean swing trades from raw OHLCV
+   - `describe_price_action` - Narrative of price behavior
+   - `propose_trade` - Entry/stop/target from structure
+
+### Workflow for "Find Opportunities" Requests
+1. `describe_price_action` for wide date range (e.g., full month)
+2. `find_price_opportunities` to identify clean trades
+3. `propose_trade` on the best 2-3 setups
+4. Present narrative: "Price did X, cleanest trades were Y"
+5. **Optionally** correlate with scanners if relevant
+
+### Never Block Analysis
+If asked about trading opportunities, you MUST provide analysis. Fallback chain:
+1. Try raw price analysis
+2. Try existing run artifacts
+3. Propose hypothetical trades
+4. **Never** end with "nothing to say because no scanner fired"
+
+---
+
 ## Safe Exploration Directives
 
 > **RULE: Exploration runs are non-promotable by default.**
