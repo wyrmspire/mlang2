@@ -724,7 +724,7 @@ CURRENT {item_type.upper()} DATA:
 
 === WORKFLOW FOR "COMPARE X vs Y" REQUESTS ===
 1. Use `execute_plan` to run analysis for X and Y sequentially.
-   Example: `execute_plan(tool_calls=[{tool_id="evaluate_scan", args={...X...}}, {tool_id="evaluate_scan", args={...Y...}}])`
+   Example: `execute_plan(tool_calls=[{{tool_id="evaluate_scan", args={{...X...}}}}, {{tool_id="evaluate_scan", args={{...Y...}} }}])`
 2. Compare the results in your final answer.
 
 NEVER answer "no signals fired" or just dump JSON as a final answer.
