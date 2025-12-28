@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import ReactMarkdown from 'react-markdown';
 import { api } from '../api/client';
 
 interface Message {
@@ -167,25 +168,9 @@ export const LabPage: React.FC<LabPageProps> = ({ onLoadRun }) => {
             <div key={idx} className="flex justify-start">
                 <div className="max-w-[90%]">
                     <div className="bg-slate-700 text-slate-100 rounded-xl px-4 py-3">
-                        {msg.content.split('\n').map((line, i) => {
-                            if (line.startsWith('##')) {
-                                return <h3 key={i} className="font-bold text-lg text-blue-400 mt-2">{line.replace('##', '').trim()}</h3>;
-                            }
-                            if (line.startsWith('**') && line.endsWith('**')) {
-                                return <p key={i} className="font-bold text-white">{line.replace(/\*\*/g, '')}</p>;
-                            }
-                            if (line.startsWith('- ')) {
-                                return <p key={i} className="text-slate-300 ml-3">• {line.substring(2)}</p>;
-                            }
-                            if (line.startsWith('|')) {
-                                return (
-                                    <div key={i} className="font-mono text-xs text-slate-300 bg-slate-800 px-2 py-1">
-                                        {line}
-                                    </div>
-                                );
-                            }
-                            return <p key={i} className="text-slate-200">{line}</p>;
-                        })}
+                        <div className="prose prose-sm prose-invert max-w-none prose-p:my-1 prose-ul:my-1 prose-ol:my-1 prose-li:my-0 prose-headings:my-2 prose-headings:text-blue-400 prose-code:bg-slate-600 prose-code:px-1 prose-code:rounded prose-pre:bg-slate-800 prose-pre:border prose-pre:border-slate-600 prose-strong:text-white">
+                            <ReactMarkdown>{msg.content}</ReactMarkdown>
+                        </div>
                     </div>
                     {msg.data?.result && renderResultTable(msg.data.result, msg.run_id)}
                 </div>

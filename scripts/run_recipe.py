@@ -34,6 +34,7 @@ def main():
     parser.add_argument("--days", type=int, default=30, help="Days to run if no days provided")
     parser.add_argument("--mock", action="store_true", help="Use synthetic data for testing")
     parser.add_argument("--light", action="store_true", help="Light mode: Database only, no viz files")
+    parser.add_argument("--no-cf", action="store_true", help="Disable counterfactual analysis")
     
     args = parser.parse_args()
     
@@ -117,6 +118,7 @@ def main():
         timeframe="1m",
         oco_config=oco_settings,
         feature_config=feature_settings,
+        compute_cf=not args.no_cf
     )
     
     # 4. Setup Exporter (ONLY IF NOT LIGHT MODE)

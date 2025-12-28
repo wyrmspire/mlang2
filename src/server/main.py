@@ -703,10 +703,9 @@ async def run_strategy_endpoint(request: StrategyRunRequest) -> Dict[str, Any]:
             "--recipe", recipe_path,
             "--out", run_id,
             "--start-date", request.start_date,
-            "--light",  # Default to light mode for agent scans
         ]
         
-        # Add light mode flag if requested
+        # Add light mode flag only if explicitly requested
         if request.light:
             cmd.append("--light")
         
@@ -870,6 +869,20 @@ async def agent_chat(request: ChatRequest) -> AgentResponse:
                             # Fetch runs and include in reply
                             runs = await list_runs()
                             reply_text = f"Available runs: {', '.join(runs[:10])}" + (" ..." if len(runs) > 10 else "")
+                        
+                        else:
+                            # Try to execute via ToolRegistry (for tools like get_dataset_summary, check_ema_cross, etc.)
+                            try:
+                                tool = ToolRegistry.create(fn_name)
+                                result = tool.execute(**fn_args)
+                                if result is not None:
+                                    import json
+                                    result_str = json.dumps(result, indent=2, default=str)[:1500]
+                                    reply_text = f"**{fn_name} result:**\n```json\n{result_str}\n```"
+                                else:
+                                    reply_text = f"Tool `{fn_name}` returned no result."
+                            except Exception as e:
+                                reply_text = f"Error executing tool `{fn_name}`: {str(e)}"
                     
                     # Check for text response
                     elif "text" in part:
@@ -1053,7 +1066,7 @@ Be concise but insightful. Users want to iterate fast."""
                                     "--out", run_name,
                                     "--start-date", start_dt.strftime("%Y-%m-%d"),
                                     "--end-date", end_dt.strftime("%Y-%m-%d"),
-                                    "--light" # Default to light mode for lab scans
+                                    # "--light" # REMOVED: Default to FULL mode for lab scans
                                 ]
                                 
                                 proc = subprocess.run(
@@ -1246,20 +1259,29 @@ Be concise but insightful. Users want to iterate fast."""
                             
                         elif fn_name == "save_to_tradeviz":
                             run_id = fn_args.get("run_id")
-                            # In this simplified setup, we'll just rename it or move it to a 'production' list
-                            # For now, let's just mark it in run.json
+                            
+                            # In current architecture, we copy from experiment DB/results to viz dir if needed
+                            # but run_strategy already creates viz files at creation time (unless light mode)
+                            # Since we are fixing light mode to be opt-in, the files should be there.
+                            # So this tool just confirms the run exists and maybe "bookmarks" it.
+                            
                             run_dir = RESULTS_DIR / "viz" / run_id
                             run_file = run_dir / "run.json"
                             
                             if run_file.exists():
-                                with open(run_file) as f:
-                                    data = json.load(f)
-                                data["is_production"] = True
-                                with open(run_file, 'w') as f:
-                                    json.dump(data, f, indent=2)
-                                reply = f"✅ Saved run `{run_id}` to Trade Viz production view."
+                                # Mark as saved/production
+                                try:
+                                    with open(run_file) as f:
+                                        data = json.load(f)
+                                    data["tags"] = data.get("tags", []) + ["saved"]
+                                    with open(run_file, 'w') as f:
+                                        json.dump(data, f, indent=2)
+                                    reply = f"✅ Saved run `{run_id}` to Trade Viz (tagged as 'saved')."
+                                except Exception as e:
+                                    reply = f"⚠️ Could not tag run: {e}"
                             else:
-                                reply = f"❌ Run `{run_id}` not found."
+                                # Start a regeneration job if files missing?
+                                reply = f"❌ Run `{run_id}` files not found. Try running 'Visualize {run_id}' first."
                                 
                         elif fn_name == "delete_run":
                             run_id = fn_args.get("run_id")

@@ -102,9 +102,13 @@ def run_experiment(
     fingerprint = compute_fingerprint(config)
     print(f"Fingerprint: {fingerprint}")
     
-    # 1. Load and prepare data
+    # 1. Load and prepare data (with date filtering for performance)
     print("Loading data...")
-    df = load_continuous_contract()
+    df = load_continuous_contract(
+        start_date=config.start_date,
+        end_date=config.end_date,
+        buffer_hours=2  # 2hr buffer before/after for context
+    )
     
     # ========================================
     # CRITICAL: Add padding to date range for full window coverage
@@ -283,11 +287,15 @@ def run_experiment(
         # But for 'Generating Data', we just record the decision.
         
         # Create record
+        # CRITICAL: Include direction in scanner_context for UI position boxes
+        context_with_direction = {**(scanner_context or {}), 'direction': effective_direction}
+        
         record = DecisionRecord(
             timestamp=result.timestamp,
             bar_idx=result.bar_idx,
             decision_id=str(uuid.uuid4())[:8],
             scanner_id=config.scanner_id,
+            scanner_context=context_with_direction,
             action=action,
             skip_reason=skip_reason,
             x_price_1m=features.x_price_1m,
@@ -301,6 +309,8 @@ def run_experiment(
         # 3. Label with counterfactual outcome (TRAINING/DATA GEN ONLY)
         # This is the "Lookahead" step that we keep ONLY for data generation.
         # It uses the Labeler to jump ahead and see what happened.
+        # CRITICAL: Must use effective_direction from scanner, not config default
+        labeler.config.oco_config.direction = effective_direction
         cf_label = labeler.label_decision_point(df, result.bar_idx, features.atr)
         record.cf_outcome = cf_label.outcome
         record.cf_pnl = cf_label.pnl
@@ -401,7 +411,7 @@ def run_experiment(
                 pnl_points, pnl_dollars = calculate_pnl_dollars(
                     entry_price=features.current_price,
                     exit_price=exit_price,
-                    direction=config.oco_config.direction,
+                    direction=effective_direction,  # FIXED: was config.oco_config.direction
                     contracts=sizing_result.contracts
                 )
 

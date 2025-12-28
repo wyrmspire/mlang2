@@ -131,6 +131,7 @@ def run_strategy_scan(
     lookahead_bars: int = 30,
     cooldown_bars: int = 20,
     extra_context_fn: Optional[Callable] = None,  # For custom per-bar context
+    compute_cf: bool = True,  # Compute counterfactual outcomes
 ) -> ScanResult:
     """
     Run a strategy scan with ALL outputs guaranteed.
@@ -177,10 +178,9 @@ def run_strategy_scan(
     print(f"Filters: {[f.name for f in filters]}")
     print("=" * 60)
     
-    # 1. Load Data
+    # 1. Load Data (with date filtering for performance)
     print("\n[1/5] Loading data...")
-    df_1m = load_continuous_contract()
-    df_1m = df_1m[(df_1m['time'] >= str(start)) & (df_1m['time'] < str(end))].reset_index(drop=True)
+    df_1m = load_continuous_contract(start_date=str(start.date()), end_date=str(end.date()))
     
     # Compute VWAP for triggers that need it
     from src.features.indicators import calculate_vwap
@@ -202,6 +202,12 @@ def run_strategy_scan(
         df_scan = df_scan.copy()
         df_scan['atr'] = calculate_atr(df_scan, 14)
         avg_atr = df_scan['atr'].dropna().mean()
+        
+        # Add EMA calculations for indicator-based triggers
+        from src.features.indicators import calculate_ema
+        for period in [9, 20, 21, 50, 200]:
+            col_name = f'ema_{timeframe}_{period}'
+            df_scan[col_name] = calculate_ema(df_scan['close'], period)
     else:
         avg_atr = 5.0
     
@@ -252,6 +258,9 @@ def run_strategy_scan(
         # Build features for trigger (mock bundle for now)
         class MockFeatures:
             pass
+        class MockIndicators:
+            pass
+        
         features = MockFeatures()
         features.current_price = bar['close']
         features.bar_high = bar['high']
@@ -259,6 +268,16 @@ def run_strategy_scan(
         features.bar_close = bar['close']
         features.timestamp = bar_time
         features.atr = atr_value
+        
+        # Add indicators for EMA-based triggers
+        indicators = MockIndicators()
+        for period in [9, 20, 21, 50, 200]:
+            col_name = f'ema_{timeframe}_{period}'
+            if col_name in bar.index:
+                setattr(indicators, col_name, bar[col_name])
+            else:
+                setattr(indicators, col_name, 0)
+        features.indicators = indicators
         
         # Add extra context if provided
         if extra_context_fn:
@@ -298,20 +317,35 @@ def run_strategy_scan(
         # Compute bracket levels
         levels = bracket.compute(entry_price, direction, atr_value)
         
-        # Find entry_idx in df_1m using time-based lookup (same pattern as raw_ohlcv)
-        cf_mask = df_1m['time'] <= bar_time
-        cf_entry_idx = cf_mask.sum() - 1 if cf_mask.any() else 0
-        
         # Compute counterfactual outcome
-        cf = compute_smart_stop_counterfactual(
-            df=df_1m,
-            entry_idx=cf_entry_idx,
-            direction=direction,
-            stop_price=levels.stop_price,
-            tp_multiple=levels.r_multiple,
-            atr=atr_value,
-            oco_name="strategy"
-        )
+        cf_outcome = ""
+        cf_pnl_dollars = 0.0
+        cf_bars_held = 0
+        
+        if compute_cf:
+            cf_mask = df_1m['time'] <= bar_time
+            cf_entry_idx = cf_mask.sum() - 1 if cf_mask.any() else 0
+            
+            try:
+                cf = compute_smart_stop_counterfactual(
+                    df=df_1m,
+                    entry_idx=cf_entry_idx,
+                    direction=direction,
+                    stop_price=levels.stop_price,
+                    tp_multiple=levels.r_multiple,
+                    atr=atr_value,
+                    oco_name="strategy"
+                )
+                cf_outcome = cf.outcome
+                cf_pnl_dollars = cf.pnl_dollars
+                cf_bars_held = cf.bars_held
+            except Exception as e:
+                print(f"Error computing counterfactual: {e}")
+                cf_outcome = "ERROR"
+        else:
+            cf_outcome = "SKIPPED"
+            # Estimate bars held based on TP/SL ratio logic or just default
+            cf_bars_held = 60  # Default estimate for window viz
         
         # Get raw OHLCV window for chart - ENFORCING 2-HOUR POLICY
         # According to ARCHITECTURE_AGREEMENT.md Section 3:
@@ -320,7 +354,7 @@ def run_strategy_scan(
         raw_ohlcv, window_warning = enforce_2hour_window(
             df_1m=df_1m,
             entry_time=bar_time,
-            bars_held=int(cf.bars_held)
+            bars_held=int(cf_bars_held)
         )
         
         # Record warning if data is missing
@@ -364,18 +398,21 @@ def run_strategy_scan(
         )
         
         # Create decision record
+        # CRITICAL: Include direction in scanner_context for UI position boxes
+        context_with_direction = {**result.context, 'direction': direction}
+        
         decision_id = f"{trigger.trigger_id}_{decision_idx:04d}"
         decision = DecisionRecord(
             decision_id=decision_id,
             timestamp=bar_time,
             bar_idx=bar_idx,
             scanner_id=trigger.trigger_id,
-            scanner_context=result.context,
+            scanner_context=context_with_direction,
             action=Action.PLACE_ORDER,
             current_price=entry_price,
             atr=atr_value,
-            cf_outcome=cf.outcome,
-            cf_pnl_dollars=cf.pnl_dollars
+            cf_outcome=cf_outcome,
+            cf_pnl_dollars=cf_pnl_dollars
         )
         
         # === REQUIRED EXPORTER HOOK 1: on_decision ===

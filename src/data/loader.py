@@ -14,7 +14,10 @@ from src.config import CONTINUOUS_CONTRACT_PATH, NY_TZ, PROCESSED_DIR
 
 def load_continuous_contract(
     path: Optional[Path] = None,
-    tz: ZoneInfo = NY_TZ
+    tz: ZoneInfo = NY_TZ,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    buffer_hours: int = 2
 ) -> pd.DataFrame:
     """
     Load continuous contract data from Parquet (preferred) or JSON file.
@@ -22,12 +25,17 @@ def load_continuous_contract(
     Args:
         path: Path to JSON file. Defaults to CONTINUOUS_CONTRACT_PATH.
         tz: Target timezone. Defaults to NY_TZ.
+        start_date: Optional start date (YYYY-MM-DD). Loads from start - buffer.
+        end_date: Optional end date (YYYY-MM-DD). Loads until end + buffer.
+        buffer_hours: Hours to add before/after date range (default 2).
         
     Returns:
         DataFrame with columns: time, open, high, low, close, volume
         Index is NOT set (time is a column).
         Time column is timezone-aware in target tz.
     """
+    from datetime import timedelta
+    
     # Try parquet first (10x faster)
     parquet_path = PROCESSED_DIR / "continuous_1m.parquet"
     if parquet_path.exists():
@@ -37,6 +45,24 @@ def load_continuous_contract(
             if df['time'].dt.tz is None:
                 df['time'] = df['time'].dt.tz_localize('UTC')
             df['time'] = df['time'].dt.tz_convert(tz)
+        
+        # Apply date filtering with buffer
+        if start_date:
+            start_dt = pd.to_datetime(start_date)
+            if start_dt.tzinfo is None:
+                start_dt = start_dt.tz_localize(tz)
+            start_dt = start_dt - timedelta(hours=buffer_hours)
+            df = df[df['time'] >= start_dt]
+        
+        if end_date:
+            end_dt = pd.to_datetime(end_date)
+            if end_dt.tzinfo is None:
+                end_dt = end_dt.tz_localize(tz)
+            # Add extra buffer for trade duration + post-exit window
+            end_dt = end_dt + timedelta(hours=buffer_hours + 4)  # 2hr buffer + ~2hr trade + 2hr post
+            df = df[df['time'] <= end_dt]
+        
+        df = df.reset_index(drop=True)
         return df
     
     # Fall back to JSON

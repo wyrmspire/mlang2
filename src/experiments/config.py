@@ -99,6 +99,9 @@ class ExperimentConfig:
     # Reproducibility
     seed: int = 42
     
+    # Performance options
+    compute_cf: bool = True  # Whether to compute counterfactual outcomes (slower but more accurate)
+    
     def to_dict(self) -> Dict[str, Any]:
         return {
             'name': self.name,
