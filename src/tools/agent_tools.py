@@ -93,14 +93,22 @@ class RunStrategyTool:
     input_schema={
         "type": "object",
         "properties": {
+            "trigger_config": {
+                "type": "object",
+                "description": "Full generic trigger configuration (alternative to trigger_type)"
+            },
             "trigger_type": {
                 "type": "string",
                 "enum": ["ema_cross", "ema_bounce", "rsi_threshold", "ifvg", "orb", "candle_pattern", "time"],
-                "description": "Type of entry trigger"
+                "description": "Type of entry trigger (legacy/simplified)"
             },
             "trigger_params": {
                 "type": "object",
                 "description": "Parameters for the trigger (e.g., {fast: 9, slow: 21} for ema_cross)"
+            },
+            "bracket_config": {
+                "type": "object",
+                "description": "Full generic bracket configuration"
             },
             "bracket_type": {
                 "type": "string",
@@ -137,7 +145,7 @@ class RunStrategyTool:
                 "default": False
             }
         },
-        "required": ["trigger_type"]
+        "required": []
     },
     produces_artifacts=True,
     artifact_spec={

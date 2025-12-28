@@ -27,6 +27,7 @@ const App: React.FC = () => {
 
   const [decisions, setDecisions] = useState<VizDecision[]>([]);
   const [trades, setTrades] = useState<VizTrade[]>([]);
+  const [planningMode, setPlanningMode] = useState<boolean>(false);
 
   // Layout State
   const [chatHeight, setChatHeight] = useState<number>(320);
@@ -166,7 +167,7 @@ const App: React.FC = () => {
   const handleAgentAction = async (action: UIAction) => {
     // If we receive a UI action that affects the chart, collapse the chat
     if (['RUN_STRATEGY', 'SET_INDEX', 'SET_MODE', 'LOAD_RUN', 'RUN_FAST_VIZ'].includes(action.type)) {
-        setIsChatExpanded(false);
+      setIsChatExpanded(false);
     }
 
     switch (action.type) {
@@ -235,38 +236,38 @@ const App: React.FC = () => {
 
   // Expand Chat on Research/Text response
   const handleAgentTextResponse = () => {
-      // If the chat isn't expanded, expand it to show the research results
-      // But only if we are NOT currently running a viz action (which is handled above)
-      // This logic is tricky because we don't know if a UI action came WITH the text.
-      // However, handleAgentAction runs for UI actions.
-      // So here we can just default to expanding, and if a UI action comes, it will collapse it.
-      // But we need to make sure this doesn't override the collapse.
+    // If the chat isn't expanded, expand it to show the research results
+    // But only if we are NOT currently running a viz action (which is handled above)
+    // This logic is tricky because we don't know if a UI action came WITH the text.
+    // However, handleAgentAction runs for UI actions.
+    // So here we can just default to expanding, and if a UI action comes, it will collapse it.
+    // But we need to make sure this doesn't override the collapse.
 
-      // Actually, ChatAgent calls onAction if there is an action.
-      // We can rely on ChatAgent to tell us if it's purely text?
-      // Or we can just trust the user flow:
-      // If I ask "analyze this", agent replies with text -> Expand.
-      // If I ask "show me this", agent replies with text + UIAction -> Collapse.
+    // Actually, ChatAgent calls onAction if there is an action.
+    // We can rely on ChatAgent to tell us if it's purely text?
+    // Or we can just trust the user flow:
+    // If I ask "analyze this", agent replies with text -> Expand.
+    // If I ask "show me this", agent replies with text + UIAction -> Collapse.
 
-      // So, we will expose a method or prop to ChatAgent to signal "Text Only Response"?
-      // Or we can just set it to true here, and handleAgentAction sets it to false.
-      // Since react updates are batched or sequential, if both happen, the last one wins?
-      // UIAction usually comes with text.
+    // So, we will expose a method or prop to ChatAgent to signal "Text Only Response"?
+    // Or we can just set it to true here, and handleAgentAction sets it to false.
+    // Since react updates are batched or sequential, if both happen, the last one wins?
+    // UIAction usually comes with text.
 
-      // Let's try: Always expand on response. But if action is present, handleAgentAction will collapse.
-      // Note: handleAgentAction is called by ChatAgent when action is present.
+    // Let's try: Always expand on response. But if action is present, handleAgentAction will collapse.
+    // Note: handleAgentAction is called by ChatAgent when action is present.
 
-      // We'll pass a callback `onTextResponse` to ChatAgent.
-      // But ChatAgent logic needs update? No, we can just use `onAction`.
+    // We'll pass a callback `onTextResponse` to ChatAgent.
+    // But ChatAgent logic needs update? No, we can just use `onAction`.
 
-      // Let's optimistically set expanded to true when user sends message? No.
-      // Let's set expanded to true when `ChatAgent` receives a message that has NO action.
-      // I'll need to modify `ChatAgent` to support `onTextResponse` or similar.
-      // For now, I'll just leave it manual or simple toggle.
-      // But user asked for "expand automatically".
+    // Let's optimistically set expanded to true when user sends message? No.
+    // Let's set expanded to true when `ChatAgent` receives a message that has NO action.
+    // I'll need to modify `ChatAgent` to support `onTextResponse` or similar.
+    // For now, I'll just leave it manual or simple toggle.
+    // But user asked for "expand automatically".
 
-      // Simple heuristic: If we are in "research mode" (no chart changes), we expand.
-      setIsChatExpanded(true);
+    // Simple heuristic: If we are in "research mode" (no chart changes), we expand.
+    setIsChatExpanded(true);
   };
 
   // NOTE: I need to update ChatAgent to call this.
@@ -367,7 +368,22 @@ const App: React.FC = () => {
             <span className="text-slate-100">Trade<span className="text-blue-500">Viz</span></span>
           </div>
 
-          <div className="flex gap-1">
+          <div className="flex items-center gap-3">
+            <label className="flex items-center gap-2 cursor-pointer group" title="Enable Planning Mode">
+              <span className={`text-[10px] font-bold uppercase tracking-wider transition-colors ${planningMode ? 'text-emerald-400' : 'text-slate-600 group-hover:text-slate-400'}`}>
+                Plan
+              </span>
+              <div className={`w-8 h-4 rounded-full p-0.5 transition-colors duration-300 ${planningMode ? 'bg-emerald-500/20 ring-1 ring-emerald-500/50' : 'bg-slate-800 ring-1 ring-slate-700'}`}>
+                <div className={`w-3 h-3 rounded-full shadow-sm transform transition-transform duration-300 ${planningMode ? 'translate-x-4 bg-emerald-400' : 'translate-x-0 bg-slate-500'}`} />
+              </div>
+              <input
+                type="checkbox"
+                checked={planningMode}
+                onChange={e => setPlanningMode(e.target.checked)}
+                className="hidden"
+              />
+            </label>
+
             <button
               onClick={() => setCurrentPage('experiments')}
               className="p-2 rounded-md text-slate-400 hover:text-blue-400 hover:bg-blue-500/10 transition-colors"
@@ -376,6 +392,7 @@ const App: React.FC = () => {
               <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z" /></svg>
             </button>
           </div>
+
         </div>
 
         {/* Scrollable Content */}
@@ -540,15 +557,15 @@ const App: React.FC = () => {
 
         {/* Chat Bottom (Fixed Height) */}
         <div style={{ height: isChatExpanded ? '60vh' : chatHeight, transition: 'height 0.3s ease-in-out' }} className="shrink-0 bg-slate-950 border-t border-slate-800 shadow-[0_-8px_30px_rgba(0,0,0,0.5)] z-20 relative">
-            <button
-                onClick={() => setIsChatExpanded(!isChatExpanded)}
-                className="absolute top-0 right-4 -mt-3 bg-slate-800 border border-slate-700 rounded-full p-1 hover:bg-slate-700 transition-colors z-50 shadow-sm"
-                title={isChatExpanded ? "Collapse" : "Expand"}
-            >
-                <svg className={`w-4 h-4 text-slate-400 transform transition-transform ${isChatExpanded ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
-                </svg>
-            </button>
+          <button
+            onClick={() => setIsChatExpanded(!isChatExpanded)}
+            className="absolute top-0 right-4 -mt-3 bg-slate-800 border border-slate-700 rounded-full p-1 hover:bg-slate-700 transition-colors z-50 shadow-sm"
+            title={isChatExpanded ? "Collapse" : "Expand"}
+          >
+            <svg className={`w-4 h-4 text-slate-400 transform transition-transform ${isChatExpanded ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
+            </svg>
+          </button>
           <ChatAgent
             runId={currentRun || 'none'}
             currentIndex={index}
@@ -562,20 +579,23 @@ const App: React.FC = () => {
       </div>
 
       {/* UNIFIED REPLAY OVERLAY */}
-      {showSimulation && (
-        <LiveSessionView
-          onClose={() => setShowSimulation(false)}
-          runId={currentRun}
-          initialMode={simulationMode}
-          lastTradeTimestamp={
-            decisions.length > 0
-              ? decisions[decisions.length - 1].timestamp || undefined
-              : undefined
-          }
-        />
-      )}
+      {
+        showSimulation && (
+          <LiveSessionView
+            onClose={() => setShowSimulation(false)}
+            runId={currentRun}
+            initialMode={simulationMode}
+            lastTradeTimestamp={
+              decisions.length > 0
+                ? decisions[decisions.length - 1].timestamp || undefined
+                : undefined
+            }
+          />
+        )
+      }
 
     </div>
+    </div >
   );
 };
 

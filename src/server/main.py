@@ -30,7 +30,9 @@ from src.data.resample import resample_all_timeframes
 from src.core.tool_registry import ToolRegistry, ToolCategory
 
 # Import agent tools to register them
-import src.tools.agent_tools  # noqa: F401
+import src.tools.agent_tools
+import src.tools.discovery_tools  # Register discovery tools  # noqa: F401
+import src.tools.composition_tools  # Register composition tools  # noqa: F401
 import src.tools.analysis_tools  # noqa: F401 - Registers analysis tools
 import src.core.strategy_tool  # noqa: F401 - Registers CompositeStrategyRunner
 import src.skills.indicator_skills  # noqa: F401 - Registers indicator tools
@@ -878,9 +880,9 @@ async def agent_chat(request: ChatRequest) -> AgentResponse:
                                 import pandas as pd
                                 
                                 recipe = {
-                                    "name": f"Research: {fn_args.get('trigger_type', 'test')}",
+                                    "name": f"Research: {fn_args.get('trigger_type', 'custom')}",
                                     "cooldown_bars": 20,
-                                    "entry_trigger": {
+                                    "entry_trigger": fn_args.get("trigger_config") or {
                                         "type": fn_args.get("trigger_type", "ema_cross"),
                                         **fn_args.get("trigger_params", {})
                                     },
@@ -894,6 +896,11 @@ async def agent_chat(request: ChatRequest) -> AgentResponse:
                                         }
                                     }
                                 }
+                                # Use bracket_config if available for OCO (simplified mapping)
+                                if fn_args.get("bracket_config"):
+                                    bc = fn_args.get("bracket_config")
+                                    recipe["oco"]["take_profit"]["multiple"] = bc.get("tp_atr", 2.5)
+                                    recipe["oco"]["stop_loss"]["multiple"] = bc.get("stop_atr", 1.5)
 
                                 # Write recipe to temp file
                                 with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
@@ -946,14 +953,13 @@ async def agent_chat(request: ChatRequest) -> AgentResponse:
                                     except:
                                         pass
 
-                            else:
                                 # Normal Viz Execution (UI Action)
                                 config = {
-                                    "trigger": {
+                                    "trigger": fn_args.get("trigger_config") or {
                                         "type": fn_args.get("trigger_type", "ema_cross"),
                                         **fn_args.get("trigger_params", {})
                                     },
-                                    "bracket": {
+                                    "bracket": fn_args.get("bracket_config") or {
                                         "type": fn_args.get("bracket_type", "atr"),
                                         "stop_atr": fn_args.get("stop_atr", 2.0),
                                         "tp_atr": fn_args.get("tp_atr", 3.0)

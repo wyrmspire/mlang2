@@ -150,7 +150,7 @@ export const ChatAgent: React.FC<ChatAgentProps> = ({ runId, currentIndex, curre
           </div>
           <button
             type="submit"
-            disabled={loading || !runId || !input.trim()}
+            disabled={loading || !input.trim()}
             className="bg-blue-600 hover:bg-blue-500 text-white rounded-xl p-3.5 shadow-lg shadow-blue-900/20 disabled:opacity-50 disabled:cursor-not-allowed transition-all transform hover:scale-105 active:scale-95 flex items-center justify-center aspect-square"
           >
             <svg className="w-5 h-5 translate-x-0.5 -translate-y-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
