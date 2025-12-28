@@ -593,24 +593,18 @@ GEMINI_MODEL = "gemini-2.0-flash-exp"
 # 
 # Tools are now generated dynamically from ToolRegistry.
 # Categories determine which tools are available in which contexts:
-# - AGENT_TOOLS: STRATEGY + UTILITY (for main agent)
-# - LAB_TOOLS: All categories (for lab agent)
+# - AGENT_TOOLS: ALL TOOLS (Unified Agent)
 # =============================================================================
 
 def get_agent_tools() -> List[Dict[str, Any]]:
-    """Get tools for main TradeViz agent (strategy + indicators only, NOT lab analysis tools)."""
-    return ToolRegistry.get_gemini_function_declarations(
-        categories=[ToolCategory.STRATEGY, ToolCategory.INDICATOR]
-    )
-
-
-def get_lab_tools() -> List[Dict[str, Any]]:
-    """Get tools for lab agent (all categories)."""
+    """Get ALL tools for the unified TradeViz agent."""
     return ToolRegistry.get_gemini_function_declarations()
+
 
 @app.delete("/experiments/clear")
 async def clear_all_experiments():
     try:
+        from src.storage.experiments_db import get_db_connection
         conn = get_db_connection()
         conn.execute("DELETE FROM experiments")
         conn.execute("DELETE FROM trades")
@@ -624,7 +618,7 @@ async def clear_all_experiments():
 
 
 def build_agent_system_prompt(context: ChatContext, decisions: List[Dict], trades: List[Dict]) -> str:
-    """Build system prompt for the trade viz agent."""
+    """Build system prompt for the unified trade viz agent."""
     # Find current item
     if context.currentMode == "DECISION":
         current = next((d for d in decisions if d.get("index") == context.currentIndex), None)
@@ -637,9 +631,9 @@ def build_agent_system_prompt(context: ChatContext, decisions: List[Dict], trade
     
     current_json = json.dumps(current, indent=2, default=str)[:1000] if current else "None selected"
 
-    return f"""You are a STRATEGY RESEARCH agent for the MLang2 backtesting platform.
+    return f"""You are a UNIFIED Research & Trading agent for the MLang2 backtesting platform.
 
-YOUR PURPOSE: Analyze HISTORICAL data to discover patterns and find trading opportunities. 
+YOUR PURPOSE: Help users design, test, analyze, AND visualize trading strategies on HISTORICAL data.
 
 === INTUITIVE EXECUTION (HIGHEST PRIORITY) ===
 1. If user instructions are incomplete (e.g., "Run a trend strategy"), use your BEST JUDGMENT to fill in the blanks.
@@ -651,18 +645,19 @@ YOUR PURPOSE: Analyze HISTORICAL data to discover patterns and find trading oppo
    - Risk: 2.0 ATR Stop / 4.0 ATR Target
 4. State your assumptions: "Parameters not specified. Running EMA Cross for 2 weeks from May 1st..."
 
-=== PRICE-FIRST RULES (CRITICAL) ===
-1. ALWAYS reason from RAW PRICE DATA first, not scanner output.
-2. If a user asks "find opportunities around date X", you MUST:
-   - Load price data for a wide window (several weeks, not just that day)
-   - Describe what price did (trend, swings, levels)
-   - Propose specific trades based on price structure
-   - NEVER say "no scanner fired" as a final answer
-3. Scanners are OPTIONAL tools, not the primary source of truth.
-4. If no strategy fired, switch to exploratory analysis from raw price.
+=== RESEARCH & ANALYSIS WORKFLOW ===
+You have access to powerful research tools.
+1. **evaluate_scan**: The BEST tool for quick research. Tests a scan condition and returns stats (win rate, EV) without loading the full chart. Use this when the user asks to "check", "test", or "analyze" a signal.
+2. **cluster_trades / compare_trade_pools**: Use these to analyze performance by time of day, session, etc.
+3. **Price First**: ALWAYS reason from RAW PRICE DATA. If asked to "find opportunities", look at price structure first.
+
+=== VISUALIZATION WORKFLOW ===
+When the user wants to SEE the results (chart, trades):
+1. **run_strategy / run_modular_strategy**: Runs the strategy and LOADS it into the visualizer.
+2. **set_index / set_mode**: Navigate the chart.
 
 === OUTPUT FORMATTING RULES (CRITICAL) ===
-After calling ANY tool, you MUST synthesize results into READABLE FORMAT:
+After calling ANY research tool (like evaluate_scan), you MUST synthesize results:
 
 1. **Never just dump raw JSON** - Always explain what the results mean.
 
@@ -675,28 +670,7 @@ After calling ANY tool, you MUST synthesize results into READABLE FORMAT:
    - "Profitable" / "Not profitable" and WHY
    - Key insight in one sentence
 
-4. **Structure your response**:
-   - Brief intro (what you analyzed)
-   - Results table
-   - Key finding / insight
-   - Recommendation
-
-5. **Example good response**:
-   "## Swing Low Analysis (May 2025)
-   
-   | Metric | Result |
-   |--------|--------|
-   | Signals | 215 |
-   | Win Rate | 60.9% |
-   | EV/Trade | +2.48 |
-   
-   **Verdict:** Profitable. RTH swing lows in a bullish month work well."
-
-6. **Example bad response** (NEVER do this):
-   "Here are the results: {{json...}}"
-
 IMPORTANT: You are working with a FIXED HISTORICAL DATASET (March 17 - September 17, 2025). 
-This is NOT live market data. When you query data, you're analyzing past patterns.
 
 CURRENT CONTEXT:
 - Run ID: {context.runId or "No run loaded"}
@@ -706,20 +680,10 @@ CURRENT CONTEXT:
 CURRENT {item_type.upper()} DATA:
 {current_json}
 
-=== YOUR TOOLS (TradeViz Agent Only) ===
-- run_strategy / run_modular_strategy: Execute a strategy scan and create viz artifacts
-- set_index: Navigate to a specific decision/trade index
-- set_mode: Switch between DECISION and TRADE views
-- load_run: Load a different run by ID
-- list_runs: Get list of available runs
-
-=== WORKFLOW FOR STRATEGY REQUESTS ===
-1. When user asks to "run", "scan", or "test" a strategy, call run_strategy or run_modular_strategy
-2. Use trigger_type to specify the entry condition (ema_cross, rsi_threshold, etc.)
-3. The strategy will create a new run visible in the run picker
-
-NOTE: You are the TradeViz agent. For analysis tasks like "evaluate scan", "cluster trades", 
-or "find opportunities", direct the user to the Lab page (🔬 icon).
+=== YOUR TOOLS ===
+- **Research**: evaluate_scan, cluster_trades, compare_trade_pools, query_experiments
+- **Execution**: run_strategy (visualize), run_modular_strategy (visualize OR silent test)
+- **Navigation**: set_index, set_mode, load_run
 
 NEVER answer "no signals fired" or just dump JSON as a final answer.
 Always provide INSIGHT and INTERPRETATION."""
@@ -862,7 +826,7 @@ async def agent_chat(request: ChatRequest) -> AgentResponse:
     
     # Add system instruction as first user message (Gemini style)
     gemini_contents.append({"role": "user", "parts": [{"text": system_prompt}]})
-    gemini_contents.append({"role": "model", "parts": [{"text": "Understood. I'm ready to help with strategy scans and navigation. What would you like to do?"}]})
+    gemini_contents.append({"role": "model", "parts": [{"text": "Understood. I am your Unified Research & Trading Agent. I can analyze historical data, run experiments, and visualize strategies on the chart. What would you like to do?"}]})
     
     # Add conversation history
     for msg in request.messages:
@@ -904,56 +868,131 @@ async def agent_chat(request: ChatRequest) -> AgentResponse:
                         
                         print(f"[AGENT] Function call: {fn_name}({fn_args})")
                         
-                        # Map function calls to UI actions
+                        # Map function calls to UI actions or Backend Actions
                         if fn_name == "run_strategy" or fn_name == "run_modular_strategy":
-                            # Build modular config from function args
-                            config = {
-                                "trigger": {
-                                    "type": fn_args.get("trigger_type", "ema_cross"),
-                                    **fn_args.get("trigger_params", {})
-                                },
-                                "bracket": {
-                                    "type": fn_args.get("bracket_type", "atr"),
-                                    "stop_atr": fn_args.get("stop_atr", 2.0),
-                                    "tp_atr": fn_args.get("tp_atr", 3.0)
-                                }
-                            }
-                            
-                            # Check if Fast Viz mode is enabled
-                            fast_viz_enabled = request.context.fastVizMode if hasattr(request.context, 'fastVizMode') else False
-                            
-                            if fast_viz_enabled:
-                                # Emit RUN_FAST_VIZ for instant ideation
+                            # Check for silent/research mode (Lab style execution)
+                            if fn_args.get("silent", False):
+                                # Run in backend and return text stats
+                                import tempfile
                                 from datetime import timedelta
                                 import pandas as pd
-                                start_date = fn_args.get('start_date', '2025-05-01')
-                                weeks = fn_args.get('weeks', 2)
-                                start_dt = pd.to_datetime(start_date)
-                                end_dt = start_dt + timedelta(weeks=weeks)
                                 
-                                ui_action = UIAction(
-                                    type="RUN_FAST_VIZ",
-                                    payload={
-                                        "config": config,
-                                        "start_date": start_date,
-                                        "end_date": end_dt.strftime("%Y-%m-%d"),
-                                        "run_name": fn_args.get('run_name')
+                                recipe = {
+                                    "name": f"Research: {fn_args.get('trigger_type', 'test')}",
+                                    "cooldown_bars": 20,
+                                    "entry_trigger": {
+                                        "type": fn_args.get("trigger_type", "ema_cross"),
+                                        **fn_args.get("trigger_params", {})
+                                    },
+                                    "oco": {
+                                        "entry": "MARKET",
+                                        "take_profit": {
+                                            "multiple": fn_args.get("tp_atr", 2.5)
+                                        },
+                                        "stop_loss": {
+                                            "multiple": fn_args.get("stop_atr", 1.5)
+                                        }
                                     }
-                                )
-                                reply_text = f"⚡ Fast Viz: {fn_args.get('trigger_type', 'modular')} strategy from {start_date} ({weeks} week(s)). Results are approximate - click 💾 to verify with full simulation."
+                                }
+
+                                # Write recipe to temp file
+                                with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+                                    json.dump(recipe, f, indent=2)
+                                    recipe_path = f.name
+
+                                run_name = fn_args.get("run_name") or f"research_{fn_args.get('trigger_type')}_{fn_args.get('start_date', '').replace('-', '')}"
+
+                                try:
+                                    # Calculate end date
+                                    start_dt = pd.to_datetime(fn_args.get("start_date", "2025-03-18"))
+                                    end_dt = start_dt + timedelta(weeks=fn_args.get("weeks", 1))
+
+                                    # Use run_recipe.py
+                                    cmd = [
+                                        sys.executable, "-m", "scripts.run_recipe",
+                                        "--recipe", recipe_path,
+                                        "--out", run_name,
+                                        "--start-date", start_dt.strftime("%Y-%m-%d"),
+                                        "--end-date", end_dt.strftime("%Y-%m-%d"),
+                                    ]
+
+                                    proc = subprocess.run(
+                                        cmd,
+                                        capture_output=True,
+                                        text=True,
+                                        timeout=120,
+                                        cwd=str(RESULTS_DIR.parent)
+                                    )
+
+                                    if proc.returncode == 0:
+                                        from src.storage import ExperimentDB
+                                        db = ExperimentDB()
+                                        run_record = db.get_run(run_name)
+
+                                        if run_record:
+                                            reply_text += f"✅ **Research Scan Complete ({run_name})**\n"
+                                            reply_text += f"- Trades: {run_record.get('total_trades')}\n"
+                                            reply_text += f"- Win Rate: {run_record.get('win_rate', 0):.1%}\n"
+                                            reply_text += f"- PnL: ${run_record.get('total_pnl', 0):.2f}\n"
+                                        else:
+                                            reply_text += "Run completed but stats not available."
+                                    else:
+                                        reply_text += f"Error running research scan: {proc.stderr}"
+                                except Exception as e:
+                                    reply_text += f"Error: {str(e)}"
+                                finally:
+                                    try:
+                                        Path(recipe_path).unlink()
+                                    except:
+                                        pass
+
                             else:
-                                # Normal full simulation
-                                ui_action = UIAction(
-                                    type="RUN_STRATEGY",
-                                    payload={
-                                        "strategy": fn_args.get("strategy", "modular"),
-                                        "start_date": fn_args.get("start_date", "2025-03-18"),
-                                        "weeks": fn_args.get("weeks", 1),
-                                        "run_name": fn_args.get("run_name"),
-                                        "config": config
+                                # Normal Viz Execution (UI Action)
+                                config = {
+                                    "trigger": {
+                                        "type": fn_args.get("trigger_type", "ema_cross"),
+                                        **fn_args.get("trigger_params", {})
+                                    },
+                                    "bracket": {
+                                        "type": fn_args.get("bracket_type", "atr"),
+                                        "stop_atr": fn_args.get("stop_atr", 2.0),
+                                        "tp_atr": fn_args.get("tp_atr", 3.0)
                                     }
-                                )
-                                reply_text = f"Running {fn_args.get('trigger_type', 'modular')} strategy scan from {fn_args.get('start_date')} for {fn_args.get('weeks')} week(s)..."
+                                }
+
+                                # Check if Fast Viz mode is enabled
+                                fast_viz_enabled = request.context.fastVizMode if hasattr(request.context, 'fastVizMode') else False
+
+                                if fast_viz_enabled:
+                                    from datetime import timedelta
+                                    import pandas as pd
+                                    start_date = fn_args.get('start_date', '2025-05-01')
+                                    weeks = fn_args.get('weeks', 2)
+                                    start_dt = pd.to_datetime(start_date)
+                                    end_dt = start_dt + timedelta(weeks=weeks)
+
+                                    ui_action = UIAction(
+                                        type="RUN_FAST_VIZ",
+                                        payload={
+                                            "config": config,
+                                            "start_date": start_date,
+                                            "end_date": end_dt.strftime("%Y-%m-%d"),
+                                            "run_name": fn_args.get('run_name')
+                                        }
+                                    )
+                                    reply_text = f"⚡ Fast Viz: {fn_args.get('trigger_type', 'modular')} strategy from {start_date} ({weeks} week(s)). Results are approximate - click 💾 to verify with full simulation."
+                                else:
+                                    ui_action = UIAction(
+                                        type="RUN_STRATEGY",
+                                        payload={
+                                            "strategy": fn_args.get("strategy", "modular"),
+                                            "start_date": fn_args.get("start_date", "2025-03-18"),
+                                            "weeks": fn_args.get("weeks", 1),
+                                            "run_name": fn_args.get("run_name"),
+                                            "config": config
+                                        }
+                                    )
+                                    reply_text = f"Running {fn_args.get('trigger_type', 'modular')} strategy scan from {fn_args.get('start_date')} for {fn_args.get('weeks')} week(s)..."
                         
                         elif fn_name == "set_index":
                             ui_action = UIAction(type="SET_INDEX", payload=fn_args.get("index", 0))
@@ -968,12 +1007,40 @@ async def agent_chat(request: ChatRequest) -> AgentResponse:
                             reply_text = f"Loading run: {fn_args.get('run_id')}"
                         
                         elif fn_name == "list_runs":
-                            # Fetch runs and include in reply
                             runs = await list_runs()
                             reply_text = f"Available runs: {', '.join(runs[:10])}" + (" ..." if len(runs) > 10 else "")
                         
+                        elif fn_name == "query_experiments":
+                            from src.storage import ExperimentDB
+                            db = ExperimentDB()
+                            min_trades = fn_args.get("min_trades", 1)
+                            best = db.query_best(
+                                fn_args.get("sort_by", "win_rate"),
+                                top_k=fn_args.get("top_k", 5),
+                                min_trades=min_trades
+                            )
+                            reply_text = f"**Top Experiments ({fn_args.get('sort_by')})**\n\n"
+                            for i, exp in enumerate(best, 1):
+                                reply_text += f"{i}. **{exp.get('strategy', 'unknown')}**: {exp.get('win_rate', 0):.1%} WR, {exp.get('total_trades', 0)} trades\n"
+
+                        elif fn_name == "start_live_mode":
+                            try:
+                                from src.server.replay_routes import start_live_replay, LiveReplayRequest
+                                req = LiveReplayRequest(
+                                    ticker=fn_args.get("ticker", "MES=F"),
+                                    strategy=fn_args.get("strategy", "ema_cross"),
+                                    days=7,
+                                    speed=10.0
+                                )
+                                resp = await start_live_replay(req)
+                                session_id = resp["session_id"]
+                                reply_text = f"**Live Mode Started**\nSession: `{session_id}`"
+                                # We could potentially trigger a UI action here to open Live View
+                            except Exception as e:
+                                reply_text = f"Error starting live mode: {e}"
+
                         else:
-                            # Try to execute via ToolRegistry (for tools like get_dataset_summary, check_ema_cross, etc.)
+                            # Generic Tool Execution (e.g. evaluate_scan, cluster_trades)
                             try:
                                 tool = ToolRegistry.create(fn_name)
                                 result = tool.execute(**fn_args)
@@ -1004,540 +1071,6 @@ async def agent_chat(request: ChatRequest) -> AgentResponse:
         except Exception as e:
             print(f"[AGENT] Error: {e}")
             return AgentResponse(reply=f"Error: {str(e)}")
-
-
-
-# =============================================================================
-# ENDPOINTS: Lab Research Agent (with Gemini Function Calling)
-# =============================================================================
-
-class LabChatRequest(BaseModel):
-    messages: List[ChatMessage]
-    planner_mode: bool = False
-
-# Lab tools now use dynamic catalog (Phase 9 complete)
-
-
-@app.post("/lab/agent")
-async def lab_agent(request: LabChatRequest):
-    """
-    Lab research agent with Gemini function calling.
-    """
-    import subprocess
-    
-    if not GEMINI_API_KEY:
-        return {"reply": "Gemini API key not configured. Set GEMINI_API_KEY.", "type": "text"}
-    
-    if not request.messages:
-        return {"reply": "No message provided.", "type": "text"}
-    
-    # Build system prompt for lab agent
-    lab_system_prompt = """You are a PROACTIVE Research Lab agent for the MLang2 backtesting platform.
-
-YOUR PURPOSE: Help users design, test, and analyze trading strategies on HISTORICAL data (March-Sept 2025).
-
-=== INTUITIVE EXECUTION (HIGHEST PRIORITY) ===
-1. If user instructions are vague (e.g., "Analyze volatility"), use BEST JUDGMENT to execute immediately.
-2. DO NOT ASK CLARIFYING QUESTIONS or say "I can do X, Y, Z". Just DO X (e.g., call evaluate_scan).
-3. Defaults:
-   - Date: 2025-05-01 to 2025-05-14 (Standard 2-week test)
-   - Scan Filters: "rth_only" (Regular session)
-4. State your assumptions clearly: "Analyzing volatility for first 2 weeks of May..."
-"""
-    
-    # Inject Planner Mode prompt if enabled
-    if request.planner_mode:
-        lab_system_prompt += """
-
-=== PLANNER MODE (ACTIVE) ===
-You are in PLANNER MODE. Instead of executing tools immediately, you MUST:
-
-1. **Analyze the request** and break it into logical steps.
-2. **Output a structured plan** as a JSON object:
-   ```json
-   {
-     "plan_overview": "Brief description of what you will accomplish",
-     "steps": [
-       {"step": 1, "tool": "tool_name", "description": "What this does", "args": {...}},
-       {"step": 2, "tool": "tool_name", "description": "What this does", "args": {...}}
-     ]
-   }
-   ```
-3. **DO NOT execute any tools**. Just return the plan.
-4. The user will review and click "Execute All" to run the plan.
-
-Example for "Compare morning vs afternoon volatility":
-```json
-{
-  "plan_overview": "Analyze volatility patterns by clustering trades into morning and afternoon sessions, then comparing their performance.",
-  "steps": [
-    {"step": 1, "tool": "cluster_trades", "description": "Group trades by session", "args": {"cluster_by": "session", "start_date": "2025-05-01", "end_date": "2025-05-14"}},
-    {"step": 2, "tool": "compare_trade_pools", "description": "Compare morning vs afternoon", "args": {"pool_a": "morning", "pool_b": "afternoon"}}
-  ]
-}
-```
-"""
-    else:
-        lab_system_prompt += """
-
-=== CRITICAL: ALWAYS CALL TOOLS ===
-When a user asks ANYTHING about strategies, trades, or analysis, you MUST call a tool. Never just respond with text.
-
-=== PRIMARY ANALYSIS TOOLS (Use These First) ===
-- evaluate_scan: Test any scan with realistic win rates and EV (USE THIS MOST)
-- cluster_trades: Group trades by time of day, session, day of week
-- compare_trade_pools: Compare morning vs afternoon, RTH vs GLOBEX
-- detect_regime: Identify TREND/RANGE/SPIKE days
-- find_price_opportunities: Find clean trades from raw price
-- describe_price_action: Narrative of what price did
-- study_obvious_trades: Complete "obvious winners" workflow
-- find_killer_moves: Find biggest opportunities in a date range
-
-=== STRATEGY EXECUTION TOOLS ===
-- run_modular_strategy: Execute a full backtest with visualization
-
-=== OUTPUT FORMATTING RULES (CRITICAL) ===
-After calling ANY tool, you MUST format results as:
-
-1. **Use markdown tables**:
-   | Metric | Value |
-   |--------|-------|
-   | Win Rate | 60.9% |
-
-2. **Provide a VERDICT**:
-   - "Profitable" / "Not profitable" and WHY
-   - Key insight in one sentence
-
-3. **NEVER just dump raw JSON**
-
-=== EXAMPLE RESPONSES ===
-
-User: "Evaluate swing_low for May 2025"
-You: *Call evaluate_scan tool first*
-Then respond:
-"## Swing Low Analysis (May 2025, RTH)
-
-| Metric | Result |
-|--------|--------|
-| Signals | 215 |
-| Win Rate | 60.9% |
-| EV/Trade | +2.48 pts |
-
-**Verdict:** Profitable! RTH swing lows work well in bullish conditions."
-
-Be concise but insightful. Users want fast iterations."""
-
-    # Build messages
-    gemini_contents = []
-    gemini_contents.append({"role": "user", "parts": [{"text": lab_system_prompt}]})
-    gemini_contents.append({"role": "model", "parts": [{"text": "Welcome to the Research Lab! I can help you test strategies, run scans, and analyze results. What would you like to explore?"}]})
-    
-    for msg in request.messages:
-        role = "user" if msg.role == "user" else "model"
-        gemini_contents.append({"role": role, "parts": [{"text": msg.content}]})
-    
-    # Build request with function calling (using dynamic lab tool catalog)
-    gemini_request = {
-        "contents": gemini_contents,
-        "tools": [{"function_declarations": get_lab_tools()}],
-        "tool_config": {"function_calling_config": {"mode": "AUTO"}}
-    }
-    
-    # Call Gemini API
-    async with httpx.AsyncClient() as client:
-        try:
-            response = await client.post(
-                f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent",
-                params={"key": GEMINI_API_KEY},
-                json=gemini_request,
-                timeout=30.0
-            )
-            response.raise_for_status()
-            data = response.json()
-            
-            reply = ""
-            result = None
-            run_id = None
-            
-            if "candidates" in data and data["candidates"]:
-                parts = data["candidates"][0].get("content", {}).get("parts", [])
-                
-                for part in parts:
-                    if "functionCall" in part:
-                        fc = part["functionCall"]
-                        fn_name = fc.get("name")
-                        fn_args = fc.get("args", {})
-                        
-                        print(f"[LAB AGENT] Function call: {fn_name}({fn_args})")
-                        
-                        if fn_name == "run_modular_strategy":
-                            # Build recipe from config
-                            import tempfile
-                            from datetime import timedelta
-                            import pandas as pd
-                            
-                            recipe = {
-                                "name": f"Lab: {fn_args.get('trigger_type', 'test')}",
-                                "cooldown_bars": 20,
-                                "entry_trigger": {
-                                    "type": fn_args.get("trigger_type", "ema_cross"),
-                                    **fn_args.get("trigger_params", {})
-                                },
-                                "oco": {
-                                    "entry": "MARKET",
-                                    "take_profit": {
-                                        "multiple": fn_args.get("tp_atr", 2.5)
-                                    },
-                                    "stop_loss": {
-                                        "multiple": fn_args.get("stop_atr", 1.5)
-                                    }
-                                }
-                            }
-                            
-                            # Write recipe to temp file
-                            with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
-                                json.dump(recipe, f, indent=2)
-                                recipe_path = f.name
-                            
-                            run_name = fn_args.get("run_name") or f"lab_{fn_args.get('trigger_type')}_{fn_args.get('start_date', '').replace('-', '')}"
-                            
-                            try:
-                                # Calculate end date
-                                start_dt = pd.to_datetime(fn_args.get("start_date", "2025-03-18"))
-                                end_dt = start_dt + timedelta(weeks=fn_args.get("weeks", 1))
-                                
-                                # Use run_recipe.py (Golden Path script)
-                                cmd = [
-                                    sys.executable, "-m", "scripts.run_recipe",
-                                    "--recipe", recipe_path,
-                                    "--out", run_name,
-                                    "--start-date", start_dt.strftime("%Y-%m-%d"),
-                                    "--end-date", end_dt.strftime("%Y-%m-%d"),
-                                    # "--light" # REMOVED: Default to FULL mode for lab scans
-                                ]
-                                
-                                proc = subprocess.run(
-                                    cmd,
-                                    capture_output=True,
-                                    text=True,
-                                    timeout=120,
-                                    cwd=str(RESULTS_DIR.parent)
-                                )
-                                
-                                if proc.returncode == 0:
-                                    # If silent is true, we don't return the run_id to prevent automatic Visual Loading
-                                    # but we still return it in the 'result' for the agent's reference.
-                                    full_run_id = run_name
-                                    run_id = None if fn_args.get("silent") else full_run_id
-                                    
-                                    out_dir = RESULTS_DIR / "viz" / full_run_id
-                                    
-                                    # Load actual results from ExperimentDB instead of files
-                                    # Because light mode skips file generation
-                                    from src.storage import ExperimentDB
-                                    db = ExperimentDB()
-                                    run_record = db.get_run(full_run_id)
-                                    
-                                    if run_record:
-                                        total_trades = run_record.get('total_trades', 0)
-                                        wins = run_record.get('wins', 0)
-                                        losses = run_record.get('losses', 0)
-                                        total_pnl = run_record.get('total_pnl', 0.0)
-                                        win_rate = run_record.get('win_rate', 0.0)
-
-                                        reply = f"✅ **Strategy Backtest Complete**\n\n"
-                                        reply += f"**Strategy:** {fn_args.get('trigger_type', 'modular').upper()}\n"
-                                        reply += f"**Period:** {start_dt.strftime('%Y-%m-%d')} to {end_dt.strftime('%Y-%m-%d')}\n"
-                                        reply += f"**Total Trades:** {total_trades}\n"
-                                        reply += f"**Win Rate:** {(win_rate * 100):.1f}%\n"
-                                        reply += f"**Total P&L:** ${total_pnl:.2f}\n"
-                                        reply += f"**Run ID:** `{full_run_id}`\n\n"
-
-                                        if not fn_args.get("silent"):
-                                            # If they want to visualize, we might need to re-run or offer option
-                                            # Since we ran in light mode, viz files don't exist.
-                                            reply += "Run is in Light Mode. To see chart, ask me to 'Visualize this run'."
-                                        else:
-                                            reply += "(Run performed in Light Mode)"
-
-                                        result = {
-                                            "strategy": fn_args.get("trigger_type", "modular").upper(),
-                                            "trades": total_trades,
-                                            "wins": wins,
-                                            "losses": losses,
-                                            "win_rate": win_rate,
-                                            "total_pnl": total_pnl,
-                                            "run_id": full_run_id
-                                        }
-                                    else:
-                                        reply = f"⚠️ Run completed but results not found in DB."
-                                        result = None
-                                else:
-                                    reply = f"❌ Strategy run failed:\n```\n{proc.stderr[-500:]}\n```"
-                            except subprocess.TimeoutExpired:
-                                reply = "❌ Strategy timed out (>120s)"
-                            except Exception as e:
-                                reply = f"❌ Error: {str(e)}"
-                            finally:
-                                # Clean up temp recipe file
-                                try:
-                                    Path(recipe_path).unlink()
-                                except:
-                                    pass
-                        
-                        elif fn_name == "start_live_mode":
-                            try:
-                                from src.server.replay_routes import start_live_replay, LiveReplayRequest
-                                
-                                req = LiveReplayRequest(
-                                    ticker=fn_args.get("ticker", "MES=F"),
-                                    strategy=fn_args.get("strategy", "ema_cross"),
-                                    days=7,
-                                    speed=10.0
-                                )
-                                
-                                resp = await start_live_replay(req)
-                                session_id = resp["session_id"]
-                                run_id = session_id
-                                
-                                reply = f"🟢 **Live Mode Started**\n\n"
-                                reply += f"**Ticker:** {fn_args.get('ticker')}\n"
-                                reply += f"**Strategy:** {fn_args.get('strategy')}\n"
-                                reply += f"**Session:** `{session_id}`\n\n"
-                                reply += "The backend is now streaming live events."
-                                
-                                result = {
-                                    "strategy": f"Live {fn_args.get('strategy', '').upper()}",
-                                    "trades": 0, "wins": 0, "losses": 0, "win_rate": 0, "total_pnl": 0
-                                }
-                            except Exception as e:
-                                reply = f"❌ Error starting live mode: {str(e)}"
-                        
-                        elif fn_name == "query_experiments":
-                            try:
-                                from src.storage import ExperimentDB
-                                db = ExperimentDB()
-                                # Allow agent to specify min_trades, default to 1 for research
-                                min_trades = fn_args.get("min_trades", 1)
-                                best = db.query_best(
-                                    fn_args.get("sort_by", "win_rate"), 
-                                    top_k=fn_args.get("top_k", 5),
-                                    min_trades=min_trades
-                                )
-                                
-                                reply = f"## Top {len(best)} Experiments by {fn_args.get('sort_by', 'win_rate')}\n"
-                                reply += f"(Minimum {min_trades} trades requirements)\n\n"
-                                
-                                for i, exp in enumerate(best, 1):
-                                    reply += f"{i}. **{exp.get('strategy', 'unknown')}**: {exp.get('win_rate', 0):.1%} WR, {exp.get('total_trades', 0)} trades, ${exp.get('total_pnl', 0):.2f} PnL\n"
-                                
-                                if not best:
-                                    reply += "No experiments found matching those criteria yet. Run some strategies first!"
-                            except Exception as e:
-                                reply = f"❌ Error querying experiments: {str(e)}"
-                        
-                        elif fn_name == "list_available_runs":
-                            runs = await list_runs()
-                            reply = f"## Available Runs ({len(runs)})\n\n"
-                            for r in runs[:15]:
-                                reply += f"- `{r}`\n"
-                            if len(runs) > 15:
-                                reply += f"\n...and {len(runs) - 15} more"
-                        
-                        elif fn_name == "get_run_config":
-                            run_id = fn_args.get("run_id")
-                            run_dir = RESULTS_DIR / "viz" / run_id
-                            run_file = run_dir / "run.json"
-                            
-                            if run_file.exists():
-                                with open(run_file) as f:
-                                    run_data = json.load(f)
-                                recipe = run_data.get("recipe", {})
-                                reply = f"## Configuration for `{run_id}`\n\n"
-                                reply += f"```json\n{json.dumps(recipe, indent=2)}\n```"
-                                result = {"recipe": recipe}
-                            else:
-                                reply = f"❌ Could not find config for run `{run_id}`"
-                                
-                        elif fn_name == "compare_runs":
-                            run_ids = fn_args.get("run_ids", [])
-                            comparison = []
-                            reply = f"## Comparison of {len(run_ids)} Runs\n\n"
-                            reply += "| Run ID | Strategy | Trades | Win Rate | P&L |\n"
-                            reply += "|--------|----------|--------|----------|-----|\n"
-                            
-                            for rid in run_ids:
-                                run_dir = RESULTS_DIR / "viz" / rid
-                                run_file = run_dir / "run.json"
-                                trades_file = run_dir / "trades.jsonl"
-                                
-                                if run_file.exists():
-                                    with open(run_file) as f:
-                                        run_data = json.load(f)
-                                    
-                                    metrics = run_data.get("metrics", {})
-                                    strategy = run_data.get("recipe", {}).get("strategy", "unknown")
-                                    
-                                    # Recalculate if metrics missing or for fresh data
-                                    if not metrics and trades_file.exists():
-                                        tpnl = 0.0
-                                        twins = 0
-                                        count = 0
-                                        with open(trades_file) as tf:
-                                            for line in tf:
-                                                if line.strip():
-                                                    t = json.loads(line)
-                                                    p = t.get('pnl_dollars', 0)
-                                                    tpnl += p
-                                                    if p > 0: twins += 1
-                                                    count += 1
-                                        wr = twins / count if count > 0 else 0
-                                        metrics = {"total_trades": count, "win_rate": wr, "total_pnl": tpnl}
-                                    
-                                    wr_str = f"{metrics.get('win_rate', 0):.1%}"
-                                    pnl_str = f"${metrics.get('total_pnl', 0):.2f}"
-                                    
-                                    reply += f"| `{rid}` | {strategy} | {metrics.get('total_trades', 0)} | {wr_str} | {pnl_str} |\n"
-                                    comparison.append({"run_id": rid, "metrics": metrics})
-                                else:
-                                    reply += f"| `{rid}` | *Not Found* | - | - | - |\n"
-                            
-                            result = {"comparison": comparison}
-                            
-                        elif fn_name == "save_to_tradeviz":
-                            run_id = fn_args.get("run_id")
-                            
-                            # In current architecture, we copy from experiment DB/results to viz dir if needed
-                            # but run_strategy already creates viz files at creation time (unless light mode)
-                            # Since we are fixing light mode to be opt-in, the files should be there.
-                            # So this tool just confirms the run exists and maybe "bookmarks" it.
-                            
-                            run_dir = RESULTS_DIR / "viz" / run_id
-                            run_file = run_dir / "run.json"
-                            
-                            if run_file.exists():
-                                # Mark as saved/production
-                                try:
-                                    with open(run_file) as f:
-                                        data = json.load(f)
-                                    data["tags"] = data.get("tags", []) + ["saved"]
-                                    with open(run_file, 'w') as f:
-                                        json.dump(data, f, indent=2)
-                                    reply = f"✅ Saved run `{run_id}` to Trade Viz (tagged as 'saved')."
-                                except Exception as e:
-                                    reply = f"⚠️ Could not tag run: {e}"
-                            else:
-                                # Start a regeneration job if files missing?
-                                reply = f"❌ Run `{run_id}` files not found. Try running 'Visualize {run_id}' first."
-                                
-                        elif fn_name == "delete_run":
-                            run_id = fn_args.get("run_id")
-                            run_dir = RESULTS_DIR / "viz" / run_id
-                            
-                            if run_dir.exists():
-                                shutil.rmtree(run_dir)
-                                reply = f"✅ Deleted run `{run_id}` and all associated data."
-                            else:
-                                reply = f"❌ Run `{run_id}` not found."
-                                
-                        elif fn_name == "create_variation":
-                            base_id = fn_args.get("base_run_id")
-                            mods = fn_args.get("modifications", {})
-                            
-                            base_dir = RESULTS_DIR / "viz" / base_id
-                            base_file = base_dir / "run.json"
-                            
-                            if base_file.exists():
-                                with open(base_file) as f:
-                                    base_data = json.load(f)
-                                
-                                base_recipe = base_data.get("recipe", {})
-                                # Merge modifications into recipe
-                                if "config" not in base_recipe:
-                                    base_recipe["config"] = {}
-                                
-                                for k, v in mods.items():
-                                    base_recipe["config"][k] = v
-                                
-                                reply = f"🆕 **Variation Prepared from `{base_id}`**\n\n"
-                                reply += "Modified parameters:\n"
-                                for k, v in mods.items():
-                                    reply += f"- `{k}`: {v}\n"
-                                reply += "\nI have prepared the new recipe. Would you like me to **run this strategy** now?"
-                                
-                                result = {
-                                    "status": "prepared",
-                                    "base_run_id": base_id,
-                                    "new_recipe": base_recipe,
-                                    "modifications": mods
-                                }
-                            else:
-                                reply = f"❌ Base run `{base_id}` not found."
-                        
-                        elif fn_name == "train_model":
-                            try:
-                                mtype = fn_args.get("model_type", "xgboost")
-                                target = fn_args.get("target")
-                                start = fn_args.get("start_date")
-                                end = fn_args.get("end_date")
-                                
-                                # Implementation: Run one of the training scripts
-                                script = "scripts/train_ifvg_4class.py" if mtype == "xgboost" else "scripts/train_ifvg_cnn.py"
-                                
-                                # We'll just simulate a training success for now to keep it responsive
-                                # but in a real scenario we'd call the script
-                                model_id = f"lab_model_{mtype}_{datetime.now().strftime('%m%d_%H%M')}"
-                                
-                                reply = f"🚀 **Model Training Started**\n\n"
-                                reply += f"**Type:** {mtype.upper()}\n"
-                                reply += f"**Target:** {target}\n"
-                                reply += f"**Period:** {start} to {end}\n"
-                                reply += f"**Model ID:** `{model_id}`\n\n"
-                                reply += "Training will take approximately 2-5 minutes. I will notify you when the weights are saved."
-                                
-                                result = {
-                                    "status": "training",
-                                    "model_id": model_id,
-                                    "estimated_time": "3m"
-                                }
-                            except Exception as e:
-                                reply = f"❌ Error starting training: {str(e)}"
-                        
-                        else:
-                            # Generic handler for any registered tool (e.g., evaluate_scan, cluster_trades)
-                            try:
-                                tool_instance = ToolRegistry.get_tool(fn_name)
-                                if tool_instance:
-                                    print(f"[LAB AGENT] Executing registered tool: {fn_name}")
-                                    tool_result = tool_instance.execute(**fn_args)
-                                    
-                                    # Format result nicely
-                                    reply = f"**{fn_name} result:**\n```json\n{json.dumps(tool_result, indent=2, default=str)}\n```"
-                                else:
-                                    reply = f"⚠️ Unknown function: {fn_name}"
-                            except Exception as e:
-                                reply = f"❌ Error executing {fn_name}: {str(e)}"
-                    
-                    elif "text" in part:
-                        reply += part["text"]
-            
-            if not reply:
-                reply = "I'm ready to help with strategy research. What would you like to test?"
-            
-            return {
-                "reply": reply,
-                "type": "text",
-                "data": {"result": result} if result else None,
-                "result": result,
-                "run_id": run_id
-            }
-            
-        except httpx.HTTPError as e:
-            print(f"[LAB AGENT] HTTP Error: {e}")
-            return {"reply": f"Error calling Gemini: {str(e)}", "type": "text"}
-        except Exception as e:
-            print(f"[LAB AGENT] Error: {e}")
-            return {"reply": f"Error: {str(e)}", "type": "text"}
 
 
 # =============================================================================
@@ -1913,4 +1446,3 @@ async def health():
         "available_runs": runs,
         "experiments_count": db.count()
     }
-

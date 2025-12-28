@@ -1,14 +1,24 @@
 services:
+  # Frontend service
   - type: web
-    name: mlang2-app
-    runtime: python
-    buildCommand: |
-      pip install -r requirements.txt
-      npm install
-      npm run build
-    startCommand: python -m uvicorn src.server.main:app --host 0.0.0.0 --port $PORT
+    name: tradeviz-frontend
+    env: node
+    plan: free
+    buildCommand: npm install && npm run build
+    startCommand: npm run preview -- --host --port $PORT
+    envVars:
+      - key: VITE_API_URL
+        value: https://tradeviz-backend.onrender.com
+
+  # Backend service
+  - type: web
+    name: tradeviz-backend
+    env: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn src.server.main:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: PYTHON_VERSION
-        value: 3.11.0
-      - key: NODE_VERSION
-        value: 20.0.0
+        value: 3.10.0
+      - key: GEMINI_API_KEY
+        sync: false

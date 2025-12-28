@@ -9,9 +9,10 @@ interface ChatAgentProps {
   currentMode: 'DECISION' | 'TRADE';
   fastVizMode?: boolean;
   onAction: (action: UIAction) => void;
+  onTextResponse?: () => void;
 }
 
-export const ChatAgent: React.FC<ChatAgentProps> = ({ runId, currentIndex, currentMode, fastVizMode = false, onAction }) => {
+export const ChatAgent: React.FC<ChatAgentProps> = ({ runId, currentIndex, currentMode, fastVizMode = false, onAction, onTextResponse }) => {
   const [messages, setMessages] = useState<ChatMessage[]>([
     { role: 'assistant', content: 'Hello! I am the **Trade Viz Agent**. How can I help with your analysis today?' }
   ]);
@@ -42,6 +43,11 @@ export const ChatAgent: React.FC<ChatAgentProps> = ({ runId, currentIndex, curre
 
       if (response.ui_action) {
         onAction(response.ui_action);
+      } else {
+        // Text-only response (likely research result), expand chat
+        if (onTextResponse) {
+          onTextResponse();
+        }
       }
     } catch (err) {
       setMessages(prev => [...prev, { role: 'assistant', content: "Error contacting agent." }]);
@@ -58,8 +64,8 @@ export const ChatAgent: React.FC<ChatAgentProps> = ({ runId, currentIndex, curre
       <div className="px-4 py-3 bg-slate-950 border-b border-slate-800 flex items-center justify-between shrink-0">
         <div className="flex items-center gap-2">
           <div className="relative">
-            <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></div>
-            <div className="absolute inset-0 w-2 h-2 rounded-full bg-emerald-500 animate-ping opacity-20"></div>
+            <div className={`w-2 h-2 rounded-full ${loading ? 'bg-amber-400' : 'bg-emerald-500'} animate-pulse`}></div>
+            <div className={`absolute inset-0 w-2 h-2 rounded-full ${loading ? 'bg-amber-400' : 'bg-emerald-500'} animate-ping opacity-20`}></div>
           </div>
           <h3 className="text-xs font-bold text-slate-300 uppercase tracking-widest">Agent Terminal</h3>
         </div>
