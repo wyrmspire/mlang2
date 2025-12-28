@@ -19,6 +19,8 @@ from datetime import datetime, timedelta
 import pandas as pd
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 import httpx
 
@@ -36,6 +38,7 @@ import src.skills.data_skills  # noqa: F401 - Registers data tools
 import src.skills.pattern_skills  # noqa: F401 - Registers pattern tools
 import src.tools.exploration_tools  # noqa: F401 - Registers safe exploration tools
 import src.tools.price_analysis_tools  # noqa: F401 - Registers price-first analysis tools
+import src.tools.planning_tools  # noqa: F401 - Registers planning tools
 
 
 
@@ -66,6 +69,31 @@ app.add_middleware(
 
 # Viz data directory
 VIZ_DIR = RESULTS_DIR / "viz"
+
+# Serve static files from 'dist' if it exists (Production Mode)
+DIST_DIR = Path("dist")
+if DIST_DIR.exists():
+    print(f"[SERVER] Serving static files from {DIST_DIR.absolute()}")
+    app.mount("/assets", StaticFiles(directory=DIST_DIR / "assets"), name="assets")
+
+    # Serve index.html for root and SPA routing
+    @app.get("/")
+    async def serve_index():
+        return FileResponse(DIST_DIR / "index.html")
+
+    # Catch-all for SPA client-side routing (only if not matching other API routes)
+    # Note: FastAPI matches routes in order. Since this is after API routes,
+    # specific API routes should take precedence.
+    # However, 'mount' routes are matched first? No, path operations are matched first usually.
+    # But /assets is mounted, so it handles itself.
+
+    # We need a fallback route for SPA
+    @app.exception_handler(404)
+    async def spa_fallback(request, exc):
+        # Only fallback for non-API routes
+        if not request.url.path.startswith("/api") and not request.url.path.startswith("/runs") and not request.url.path.startswith("/agent"):
+             return FileResponse(DIST_DIR / "index.html")
+        raise exc
 
 
 # =============================================================================
@@ -669,6 +697,10 @@ CURRENT CONTEXT:
 CURRENT {item_type.upper()} DATA:
 {current_json}
 
+=== PLANNING & REASONING (Use for Complex Tasks) ===
+- create_plan: Outline a multi-step plan before execution. Use this for "big plans".
+- execute_plan: Execute multiple tools in sequence. Use this for "Compare X vs Y" or complex workflows.
+
 === PRIMARY TOOLS (Use These First) ===
 - evaluate_scan: Realistically backtest any scan with win rate and EV
 - cluster_trades: Group trades by time of day, session, day of week
@@ -682,12 +714,18 @@ CURRENT {item_type.upper()} DATA:
 - explore_strategy: Run parameter sweeps
 - run_composite_strategy: Execute a backtest with visualization
 - get_session_context: RTH/Globex, ORH/ORL context
+- find_killer_moves: Use ONLY when specifically asked for "killer moves" or "best trades". Do NOT use as default for general opportunities.
 
 === WORKFLOW FOR "FIND OPPORTUNITIES" REQUESTS ===
 1. Call describe_price_action for a wide date range
 2. Call find_price_opportunities to identify clean trades
 3. Call evaluate_scan if user wants win rates
 4. Present a FORMATTED summary with tables and verdict
+
+=== WORKFLOW FOR "COMPARE X vs Y" REQUESTS ===
+1. Use `execute_plan` to run analysis for X and Y sequentially.
+   Example: `execute_plan(tool_calls=[{{tool_id="evaluate_scan", args={{...X...}}}}, {{tool_id="evaluate_scan", args={{...Y...}} }}])`
+2. Compare the results in your final answer.
 
 NEVER answer "no signals fired" or just dump JSON as a final answer.
 Always provide INSIGHT and INTERPRETATION."""
@@ -1405,16 +1443,24 @@ Be concise but insightful. Users want fast iterations."""
                             # Generic handler for any registered tool (e.g., evaluate_scan, cluster_trades)
                             try:
                                 tool_instance = ToolRegistry.get_tool(fn_name)
+                                # If get_tool returns None, try to create it (for tools that need params in init,
+                                # though ToolRegistry.get_tool creates new instance for parameterless init tools)
+                                if not tool_instance:
+                                     try:
+                                         tool_instance = ToolRegistry.create(fn_name)
+                                     except ValueError:
+                                         pass
+
                                 if tool_instance:
                                     print(f"[LAB AGENT] Executing registered tool: {fn_name}")
                                     tool_result = tool_instance.execute(**fn_args)
                                     
                                     # Format result nicely
-                                    reply = f"**{fn_name} result:**\n```json\n{json.dumps(tool_result, indent=2, default=str)}\n```"
+                                    reply += f"\n**{fn_name} result:**\n```json\n{json.dumps(tool_result, indent=2, default=str)[:2000]}\n```" # Truncate large outputs
                                 else:
-                                    reply = f"⚠️ Unknown function: {fn_name}"
+                                    reply += f"\n⚠️ Unknown function: {fn_name}"
                             except Exception as e:
-                                reply = f"❌ Error executing {fn_name}: {str(e)}"
+                                reply += f"\n❌ Error executing {fn_name}: {str(e)}"
                     
                     elif "text" in part:
                         reply += part["text"]
