@@ -6,13 +6,15 @@
  */
 
 import { useMemo } from 'react';
-import type { OHLCV, IndicatorSettings, IndicatorPoint, BandPoint } from '../features/chart_indicators';
+import type { OHLCV, IndicatorSettings, IndicatorPoint, BandPoint, AdrZones } from '../features/chart_indicators';
 import {
     calculateEMA,
+    calculateSMA,
     calculateVWAP,
     calculateATRBands,
     calculateBollingerBands,
     calculateDonchianChannels,
+    calculateADR,
 } from '../features/chart_indicators';
 
 export interface IndicatorData {
@@ -23,6 +25,8 @@ export interface IndicatorData {
     atrBands: BandPoint[];
     bollingerBands: BandPoint[];
     donchianChannels: BandPoint[];
+    adr: AdrZones[];
+    customIndicators: Map<string, IndicatorPoint[]>;  // id -> data
 }
 
 /**
@@ -39,6 +43,8 @@ export function useIndicators(candles: OHLCV[], settings: IndicatorSettings): In
             atrBands: [],
             bollingerBands: [],
             donchianChannels: [],
+            adr: [],
+            customIndicators: new Map(),
         };
 
         if (!candles || candles.length < 3) {
@@ -70,6 +76,22 @@ export function useIndicators(candles: OHLCV[], settings: IndicatorSettings): In
         }
         if (settings.donchianChannels) {
             data.donchianChannels = calculateDonchianChannels(candles, 20);
+        }
+
+        // ADR
+        if (settings.adr) {
+            data.adr = calculateADR(candles, 14);
+        }
+
+        // Custom Indicators
+        if (settings.customIndicators) {
+            for (const custom of settings.customIndicators) {
+                if (custom.type === 'ema') {
+                    data.customIndicators.set(custom.id, calculateEMA(candles, custom.period));
+                } else if (custom.type === 'sma') {
+                    data.customIndicators.set(custom.id, calculateSMA(candles, custom.period));
+                }
+            }
         }
 
         return data;

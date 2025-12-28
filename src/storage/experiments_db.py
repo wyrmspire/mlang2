@@ -278,10 +278,22 @@ class ExperimentDB:
     
     def delete_run(self, run_id: str) -> bool:
         """Delete a run by ID."""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        cursor.execute("DELETE FROM experiments WHERE run_id = ?", (run_id,))
-        deleted = cursor.rowcount > 0
-        conn.commit()
-        conn.close()
-        return deleted
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM experiments WHERE run_id = ?", (run_id,))
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def delete_all(self):
+        """Delete ALL runs from the database."""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM experiments")
+            conn.commit()
+        # The following lines are redundant when using 'with sqlite3.connect(...) as conn:'
+        # conn.commit()
+        # conn.close()
+        # The variable 'deleted' is not defined in this scope.
+        # A more appropriate return would be True for success, or the number of rows deleted.
+        # For faithfulness to the instruction, I'll make it return True as a placeholder for success.
+        return True

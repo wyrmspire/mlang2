@@ -243,6 +243,134 @@ export function calculateDonchianChannels(candles: OHLCV[], period: number = 20)
 }
 
 // =============================================================================
+// SMA (Simple Moving Average)
+// =============================================================================
+
+/**
+ * Calculate SMA for a series of candles
+ */
+export function calculateSMA(candles: OHLCV[], period: number): IndicatorPoint[] {
+    if (candles.length < period) return [];
+
+    const result: IndicatorPoint[] = [];
+
+    for (let i = period - 1; i < candles.length; i++) {
+        let sum = 0;
+        for (let j = i - period + 1; j <= i; j++) {
+            sum += candles[j].close;
+        }
+        result.push({ time: candles[i].time, value: sum / period });
+    }
+
+    return result;
+}
+
+// =============================================================================
+// ADR (Average Daily Range)
+// =============================================================================
+
+export interface AdrZones {
+    time: number | string;
+    resTop: number;      // Resistance zone top
+    resBottom: number;   // Resistance zone bottom  
+    supTop: number;      // Support zone top (same as resBottom for middle)
+    supBottom: number;   // Support zone bottom
+    sessionOpen: number; // Session open price (midpoint)
+}
+
+/**
+ * Calculate ADR zones - outputs ADR levels for EVERY candle so lines render horizontally.
+ * 
+ * ADR zones are based on average daily range projected from session open.
+ * - Resistance zone: sessionOpen + halfRange (14-period) to sessionOpen + halfRange * 0.5 (7-period)
+ * - Support zone: sessionOpen - halfRange * 0.5 to sessionOpen - halfRange
+ * 
+ * @param candles - OHLCV data (should be at your display timeframe)
+ * @param period - Lookback period for ADR calculation (default 14)
+ */
+export function calculateADR(candles: OHLCV[], period: number = 14): AdrZones[] {
+    if (candles.length < period + 1) return [];
+
+    // Step 1: Group candles by day and calculate daily high/low/open
+    const dailyData: Map<string, { high: number; low: number; open: number; candles: OHLCV[] }> = new Map();
+
+    for (const candle of candles) {
+        const date = typeof candle.time === 'number'
+            ? new Date(candle.time * 1000).toDateString()
+            : new Date(candle.time).toDateString();
+
+        const existing = dailyData.get(date);
+        if (existing) {
+            existing.high = Math.max(existing.high, candle.high);
+            existing.low = Math.min(existing.low, candle.low);
+            existing.candles.push(candle);
+        } else {
+            dailyData.set(date, {
+                high: candle.high,
+                low: candle.low,
+                open: candle.open,
+                candles: [candle]
+            });
+        }
+    }
+
+    const days = Array.from(dailyData.values());
+    if (days.length < period + 1) return [];
+
+    // Step 2: Calculate ADR for each candle
+    const result: AdrZones[] = [];
+    let dayIndex = 0;
+
+    for (const [dateStr, dayData] of dailyData) {
+        dayIndex++;
+
+        // Need at least 'period' previous days to calculate ADR
+        if (dayIndex <= period) continue;
+
+        // Calculate average range from previous 'period' days
+        let sumRange = 0;
+        let count = 0;
+        const prevDays = Array.from(dailyData.values()).slice(dayIndex - period - 1, dayIndex - 1);
+
+        for (const prevDay of prevDays) {
+            sumRange += prevDay.high - prevDay.low;
+            count++;
+        }
+
+        if (count < period) continue;
+
+        const avgRange = sumRange / period;
+        const halfRange = avgRange / 2;
+        const sessionOpen = dayData.open;
+
+        // Output ADR levels for EVERY candle in this day (creates horizontal lines)
+        for (const candle of dayData.candles) {
+            result.push({
+                time: candle.time,
+                resTop: sessionOpen + halfRange,          // Red zone top (14-period)
+                resBottom: sessionOpen + halfRange * 0.5, // Red zone bottom (7-period approx)
+                supTop: sessionOpen - halfRange * 0.5,    // Green zone top
+                supBottom: sessionOpen - halfRange,       // Green zone bottom (14-period)
+                sessionOpen,
+            });
+        }
+    }
+
+    return result;
+}
+
+// =============================================================================
+// Custom Indicator Type
+// =============================================================================
+
+export interface CustomIndicator {
+    id: string;
+    type: 'ema' | 'sma';
+    period: number;
+    color: string;
+}
+
+// =============================================================================
 // Indicator Settings Type
 // =============================================================================
 
@@ -254,6 +382,8 @@ export interface IndicatorSettings {
     atrBands: boolean;
     bollingerBands: boolean;
     donchianChannels: boolean;
+    adr: boolean;
+    customIndicators?: CustomIndicator[];
 }
 
 export const DEFAULT_INDICATOR_SETTINGS: IndicatorSettings = {
@@ -264,4 +394,6 @@ export const DEFAULT_INDICATOR_SETTINGS: IndicatorSettings = {
     atrBands: false,
     bollingerBands: false,
     donchianChannels: false,
+    adr: false,
+    customIndicators: [],
 };

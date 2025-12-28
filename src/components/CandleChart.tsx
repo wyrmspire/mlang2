@@ -266,10 +266,11 @@ export const CandleChart: React.FC<CandleChartProps> = ({
         seriesRef.current.setMarkers(decisionMarkers);
     }, [decisionMarkers]);
 
-    // Convert bars to OHLCV format for indicators
+    // Convert AGGREGATED bars to OHLCV format for indicators
+    // CRITICAL: Use aggregatedBars (matching timeframe) not raw 1m bars
     const indicatorCandles: OHLCV[] = useMemo(() => {
-        if (!continuousData?.bars?.length) return [];
-        return continuousData.bars.map(bar => ({
+        if (!aggregatedBars?.length) return [];
+        return aggregatedBars.map(bar => ({
             time: parseTime(bar.time),
             open: bar.open,
             high: bar.high,
@@ -277,12 +278,12 @@ export const CandleChart: React.FC<CandleChartProps> = ({
             close: bar.close,
             volume: bar.volume || 0
         }));
-    }, [continuousData]);
+    }, [aggregatedBars]);
 
     // Calculate indicator data
     const indicatorData = useIndicators(
         indicatorCandles,
-        indicatorSettings || { ema9: false, ema21: false, ema200: false, vwap: false, atrBands: false, bollingerBands: false, donchianChannels: false }
+        indicatorSettings || { ema9: false, ema21: false, ema200: false, vwap: false, atrBands: false, bollingerBands: false, donchianChannels: false, adr: false, customIndicators: [] }
     );
 
     // Render indicator line series
@@ -367,6 +368,80 @@ export const CandleChart: React.FC<CandleChartProps> = ({
         updateBandSeries('atrBands', indicatorData.atrBands, INDICATOR_COLORS.atrBands, indicatorSettings.atrBands);
         updateBandSeries('bollingerBands', indicatorData.bollingerBands, INDICATOR_COLORS.bollingerBands, indicatorSettings.bollingerBands);
         updateBandSeries('donchianChannels', indicatorData.donchianChannels, INDICATOR_COLORS.donchianChannels, indicatorSettings.donchianChannels);
+
+        // ADR Zones (resistance top/bottom + support top/bottom = 4 lines)
+        if (indicatorSettings.adr && indicatorData.adr.length > 0) {
+            // Resistance zone
+            let resTopSeries = seriesMap.get('adr_resTop');
+            if (!resTopSeries) {
+                resTopSeries = chart.addLineSeries({ color: '#ef4444', lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
+                seriesMap.set('adr_resTop', resTopSeries);
+            }
+            resTopSeries.setData(indicatorData.adr.map(z => ({ time: z.time as Time, value: z.resTop })));
+
+            let resBottomSeries = seriesMap.get('adr_resBottom');
+            if (!resBottomSeries) {
+                resBottomSeries = chart.addLineSeries({ color: '#f87171', lineWidth: 1, priceLineVisible: false, lastValueVisible: false, lineStyle: 2 });
+                seriesMap.set('adr_resBottom', resBottomSeries);
+            }
+            resBottomSeries.setData(indicatorData.adr.map(z => ({ time: z.time as Time, value: z.resBottom })));
+
+            // Support zone
+            let supBottomSeries = seriesMap.get('adr_supBottom');
+            if (!supBottomSeries) {
+                supBottomSeries = chart.addLineSeries({ color: '#22c55e', lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
+                seriesMap.set('adr_supBottom', supBottomSeries);
+            }
+            supBottomSeries.setData(indicatorData.adr.map(z => ({ time: z.time as Time, value: z.supBottom })));
+
+            let supTopSeries = seriesMap.get('adr_supTop');
+            if (!supTopSeries) {
+                supTopSeries = chart.addLineSeries({ color: '#4ade80', lineWidth: 1, priceLineVisible: false, lastValueVisible: false, lineStyle: 2 });
+                seriesMap.set('adr_supTop', supTopSeries);
+            }
+            supTopSeries.setData(indicatorData.adr.map(z => ({ time: z.time as Time, value: z.supTop })));
+        } else {
+            // Remove ADR series
+            ['adr_resTop', 'adr_resBottom', 'adr_supTop', 'adr_supBottom'].forEach(key => {
+                const existing = seriesMap.get(key);
+                if (existing) {
+                    chart.removeSeries(existing);
+                    seriesMap.delete(key);
+                }
+            });
+        }
+
+        // Custom Indicators
+        const customIds = new Set(indicatorSettings.customIndicators?.map(i => i.id) || []);
+
+        // Remove deleted custom indicators
+        for (const key of seriesMap.keys()) {
+            if (key.startsWith('custom_') && !customIds.has(key.replace('custom_', ''))) {
+                const series = seriesMap.get(key);
+                if (series) {
+                    chart.removeSeries(series);
+                    seriesMap.delete(key);
+                }
+            }
+        }
+
+        // Add/update custom indicators
+        for (const custom of indicatorSettings.customIndicators || []) {
+            const data = indicatorData.customIndicators.get(custom.id);
+            if (data && data.length > 0) {
+                let series = seriesMap.get(`custom_${custom.id}`);
+                if (!series) {
+                    series = chart.addLineSeries({
+                        color: custom.color,
+                        lineWidth: 1,
+                        priceLineVisible: false,
+                        lastValueVisible: false,
+                    });
+                    seriesMap.set(`custom_${custom.id}`, series);
+                }
+                series.setData(data.map(p => ({ time: p.time as Time, value: p.value })));
+            }
+        }
 
     }, [indicatorSettings, indicatorData]);
 

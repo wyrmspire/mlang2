@@ -299,8 +299,8 @@ const App: React.FC = () => {
 
         {/* Chart Top (Flex Grow) */}
         <div className="flex-1 min-h-0 relative bg-slate-900">
-          {/* Indicator Settings - Top of chart */}
-          <div className="absolute top-2 right-2 z-30">
+          {/* Indicator Settings - Top LEFT of chart */}
+          <div className="absolute top-2 left-2 z-30">
             <IndicatorSettingsPanel settings={indicatorSettings} onChange={setIndicatorSettings} />
           </div>
 
@@ -312,23 +312,6 @@ const App: React.FC = () => {
             trades={trades}
             indicatorSettings={indicatorSettings}
           />
-
-          {/* Floating Info Overlay (Over Chart) */}
-          {activeDecision && (
-            <div className="absolute top-6 left-6 glass px-4 py-3 rounded-lg text-xs shadow-xl pointer-events-none z-20 min-w-[200px] animate-fade-in">
-              <div className="font-mono text-white text-sm font-semibold mb-1">{activeDecision?.timestamp}</div>
-              <div className="flex items-center justify-between mb-1">
-                <div className="text-blue-400 font-bold uppercase tracking-wide">{activeDecision?.scanner_id || 'unknown'}</div>
-                <div className="text-slate-500 font-mono">#{activeDecision?.index}</div>
-              </div>
-
-              {activeDecision?.scanner_context?.direction && (
-                <div className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-bold border ${activeDecision.scanner_context.direction === 'LONG' ? 'bg-green-500/10 text-green-400 border-green-500/20' : 'bg-red-500/10 text-red-400 border-red-500/20'}`}>
-                  {activeDecision.scanner_context.direction === 'LONG' ? '↑' : '↓'} {activeDecision.scanner_context.direction}
-                </div>
-              )}
-            </div>
-          )}
         </div>
 
         {/* Resizer Handle */}

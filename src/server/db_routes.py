@@ -95,6 +95,59 @@ async def get_experiment(run_id: str):
     record['has_viz'] = has_viz
     return record
 
+
+# Helper for robust deletion on Windows
+def on_rm_error(func, path, exc_info):
+    """
+    Error handler for ``shutil.rmtree``.
+
+    If the error is due to an access error (read only file)
+    it attempts to add write permission and then retries.
+
+    If the error is for another reason it re-raises the error.
+    
+    Usage : ``shutil.rmtree(path, onerror=on_rm_error)``
+    """
+    import stat
+    # Is the error an access error?
+    if not os.access(path, os.W_OK):
+        os.chmod(path, stat.S_IWUSR)
+        func(path)
+    else:
+        raise
+
+@router.delete("/clear")
+async def clear_experiments():
+    """Delete ALL experiments and artifacts."""
+    db = ExperimentDB()
+    
+    # 1. Clear DB
+    try:
+        db.delete_all()
+    except Exception as e:
+        print(f"Error clearing DB: {e}")
+
+    # 2. Clear run directories from RESULTS_DIR
+    # This ensures we delete everything, including _test runs and viz
+    if RESULTS_DIR.exists():
+        for item in RESULTS_DIR.iterdir():
+            # Skip the database file itself
+            if item.name == "experiments.db":
+                continue
+                
+            try:
+                if item.is_dir():
+                    shutil.rmtree(item, onerror=on_rm_error)
+                else:
+                    item.unlink()
+            except Exception as e:
+                print(f"Failed to delete {item}: {e}")
+
+    # Recreate viz directory as it's expected by some components
+    (RESULTS_DIR / "viz").mkdir(exist_ok=True)
+    
+    return {"success": True, "message": "All experiments cleared"}
+
 @router.delete("/{run_id}")
 async def delete_experiment(run_id: str):
     """Delete an experiment and its artifacts."""
