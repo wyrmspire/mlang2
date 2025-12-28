@@ -10,6 +10,8 @@ import { LiveSessionView } from './components/LiveSessionView';
 import { StatsPanel } from './components/StatsPanel';
 import { LabPage } from './components/LabPage';
 import ExperimentsView from './components/ExperimentsView';
+import { IndicatorSettingsPanel } from './components/IndicatorSettings';
+import { DEFAULT_INDICATOR_SETTINGS, type IndicatorSettings } from './features/chart_indicators';
 
 type PageType = 'trade' | 'lab' | 'experiments';
 
@@ -30,6 +32,9 @@ const App: React.FC = () => {
   // Layout State
   const [chatHeight, setChatHeight] = useState<number>(300);
   const isResizingRef = useRef(false);
+
+  // Indicator Settings State
+  const [indicatorSettings, setIndicatorSettings] = useState<IndicatorSettings>(DEFAULT_INDICATOR_SETTINGS);
 
   // Load continuous contract data
   useEffect(() => {
@@ -294,12 +299,18 @@ const App: React.FC = () => {
 
         {/* Chart Top (Flex Grow) */}
         <div className="flex-1 min-h-0 relative bg-slate-900">
+          {/* Indicator Settings - Top of chart */}
+          <div className="absolute top-2 right-2 z-30">
+            <IndicatorSettingsPanel settings={indicatorSettings} onChange={setIndicatorSettings} />
+          </div>
+
           <CandleChart
             continuousData={continuousData}
             decisions={decisions}
             activeDecision={activeDecision}
             trade={activeTrade}
             trades={trades}
+            indicatorSettings={indicatorSettings}
           />
 
           {/* Floating Info Overlay (Over Chart) */}
@@ -307,8 +318,8 @@ const App: React.FC = () => {
             <div className="absolute top-6 left-6 glass px-4 py-3 rounded-lg text-xs shadow-xl pointer-events-none z-20 min-w-[200px] animate-fade-in">
               <div className="font-mono text-white text-sm font-semibold mb-1">{activeDecision?.timestamp}</div>
               <div className="flex items-center justify-between mb-1">
-                 <div className="text-blue-400 font-bold uppercase tracking-wide">{activeDecision?.scanner_id || 'unknown'}</div>
-                 <div className="text-slate-500 font-mono">#{activeDecision?.index}</div>
+                <div className="text-blue-400 font-bold uppercase tracking-wide">{activeDecision?.scanner_id || 'unknown'}</div>
+                <div className="text-slate-500 font-mono">#{activeDecision?.index}</div>
               </div>
 
               {activeDecision?.scanner_context?.direction && (

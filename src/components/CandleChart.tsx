@@ -2,6 +2,9 @@ import React, { useEffect, useRef, useState, useMemo } from 'react';
 import { createChart, ColorType, IChartApi, ISeriesApi, Time, SeriesMarker } from 'lightweight-charts';
 import { VizDecision, VizTrade, ContinuousData, BarData } from '../types/viz';
 import { PositionBox, createTradePositionBoxes } from './PositionBox';
+import type { IndicatorSettings, OHLCV } from '../features/chart_indicators';
+import { useIndicators } from '../hooks/useIndicators';
+import { INDICATOR_COLORS } from './IndicatorSettings';
 
 interface SimulationOco {
     entry: number;
@@ -17,6 +20,7 @@ interface CandleChartProps {
     trade: VizTrade | null;                 // Active trade for position box
     trades?: VizTrade[];                    // All trades for overlay mode
     simulationOco?: SimulationOco | null;   // OCO state for simulation mode
+    indicatorSettings?: IndicatorSettings;
     // NOTE: forceShowAllTrades and defaultShowAllTrades were REMOVED
     // The "Show All Trades" feature had broken bars_held parsing
 }
@@ -118,6 +122,7 @@ export const CandleChart: React.FC<CandleChartProps> = ({
     trade,
     trades = [],
     simulationOco,
+    indicatorSettings,
 }) => {
     const chartContainerRef = useRef<HTMLDivElement>(null);
     const chartRef = useRef<IChartApi | null>(null);
@@ -128,6 +133,9 @@ export const CandleChart: React.FC<CandleChartProps> = ({
     // NOTE: allTradesBoxesRef was REMOVED - "Show All Trades" feature was broken
     const simOcoBoxesRef = useRef<PositionBox[]>([]);
     const simPriceLinesRef = useRef<any[]>([]);
+
+    // Indicator series refs
+    const indicatorSeriesRef = useRef<Map<string, ISeriesApi<"Line">>>(new Map());
 
     const [timeframe, setTimeframe] = useState<Timeframe>('1m');
     const [isLoading, setIsLoading] = useState(true);
@@ -257,6 +265,110 @@ export const CandleChart: React.FC<CandleChartProps> = ({
         if (!seriesRef.current) return;
         seriesRef.current.setMarkers(decisionMarkers);
     }, [decisionMarkers]);
+
+    // Convert bars to OHLCV format for indicators
+    const indicatorCandles: OHLCV[] = useMemo(() => {
+        if (!continuousData?.bars?.length) return [];
+        return continuousData.bars.map(bar => ({
+            time: parseTime(bar.time),
+            open: bar.open,
+            high: bar.high,
+            low: bar.low,
+            close: bar.close,
+            volume: bar.volume || 0
+        }));
+    }, [continuousData]);
+
+    // Calculate indicator data
+    const indicatorData = useIndicators(
+        indicatorCandles,
+        indicatorSettings || { ema9: false, ema21: false, ema200: false, vwap: false, atrBands: false, bollingerBands: false, donchianChannels: false }
+    );
+
+    // Render indicator line series
+    useEffect(() => {
+        if (!chartRef.current || !indicatorSettings) return;
+
+        const chart = chartRef.current;
+        const seriesMap = indicatorSeriesRef.current;
+
+        // Helper to create or update a line series
+        const updateLineSeries = (key: string, data: Array<{ time: number | string; value: number }>, color: string, enabled: boolean) => {
+            if (enabled && data.length > 0) {
+                let series = seriesMap.get(key);
+                if (!series) {
+                    series = chart.addLineSeries({
+                        color,
+                        lineWidth: 1,
+                        priceLineVisible: false,
+                        lastValueVisible: false,
+                    });
+                    seriesMap.set(key, series);
+                }
+                series.setData(data.map(p => ({ time: p.time as Time, value: p.value })));
+            } else {
+                const existing = seriesMap.get(key);
+                if (existing) {
+                    chart.removeSeries(existing);
+                    seriesMap.delete(key);
+                }
+            }
+        };
+
+        // Helper to create band series (upper + lower as separate lines)
+        const updateBandSeries = (key: string, data: Array<{ time: number | string; upper: number; lower: number; middle?: number }>, color: string, enabled: boolean) => {
+            if (enabled && data.length > 0) {
+                // Upper band
+                let upperSeries = seriesMap.get(`${key}_upper`);
+                if (!upperSeries) {
+                    upperSeries = chart.addLineSeries({ color, lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
+                    seriesMap.set(`${key}_upper`, upperSeries);
+                }
+                upperSeries.setData(data.map(p => ({ time: p.time as Time, value: p.upper })));
+
+                // Lower band
+                let lowerSeries = seriesMap.get(`${key}_lower`);
+                if (!lowerSeries) {
+                    lowerSeries = chart.addLineSeries({ color, lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
+                    seriesMap.set(`${key}_lower`, lowerSeries);
+                }
+                lowerSeries.setData(data.map(p => ({ time: p.time as Time, value: p.lower })));
+
+                // Middle band (optional)
+                if (data[0]?.middle !== undefined) {
+                    let middleSeries = seriesMap.get(`${key}_middle`);
+                    if (!middleSeries) {
+                        middleSeries = chart.addLineSeries({ color, lineWidth: 1, lineStyle: 2, priceLineVisible: false, lastValueVisible: false });
+                        seriesMap.set(`${key}_middle`, middleSeries);
+                    }
+                    middleSeries.setData(data.map(p => ({ time: p.time as Time, value: p.middle! })));
+                }
+            } else {
+                // Remove all band series
+                ['_upper', '_lower', '_middle'].forEach(suffix => {
+                    const existing = seriesMap.get(`${key}${suffix}`);
+                    if (existing) {
+                        chart.removeSeries(existing);
+                        seriesMap.delete(`${key}${suffix}`);
+                    }
+                });
+            }
+        };
+
+        // EMAs
+        updateLineSeries('ema9', indicatorData.ema9, INDICATOR_COLORS.ema9, indicatorSettings.ema9);
+        updateLineSeries('ema21', indicatorData.ema21, INDICATOR_COLORS.ema21, indicatorSettings.ema21);
+        updateLineSeries('ema200', indicatorData.ema200, INDICATOR_COLORS.ema200, indicatorSettings.ema200);
+
+        // VWAP
+        updateLineSeries('vwap', indicatorData.vwap, INDICATOR_COLORS.vwap, indicatorSettings.vwap);
+
+        // Bands
+        updateBandSeries('atrBands', indicatorData.atrBands, INDICATOR_COLORS.atrBands, indicatorSettings.atrBands);
+        updateBandSeries('bollingerBands', indicatorData.bollingerBands, INDICATOR_COLORS.bollingerBands, indicatorSettings.bollingerBands);
+        updateBandSeries('donchianChannels', indicatorData.donchianChannels, INDICATOR_COLORS.donchianChannels, indicatorSettings.donchianChannels);
+
+    }, [indicatorSettings, indicatorData]);
 
     // ========================================
     // SHOW ALL TRADE BOXES ON LOAD - FIXED 2025-12-25
