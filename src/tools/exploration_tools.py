@@ -27,7 +27,7 @@ EXPLORATION_DIR = RESULTS_DIR / "exploration"
     tool_id="explore_strategy",
     category=ToolCategory.UTILITY,
     name="Explore Strategy (Safe)",
-    description="Run parameter sweeps WITHOUT generating TradeViz artifacts. Output goes to results/exploration/ only. Use this for brute-force optimization.",
+    description="Run parameter sweeps WITHOUT generating TradeViz artifacts. Output goes to results/exploration/ only. NOTE: Counterfactuals are disabled for speed - this is for parameter optimization only, not detailed trade analysis.",
     input_schema={
         "type": "object",
         "properties": {
