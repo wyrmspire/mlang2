@@ -19,6 +19,8 @@ from datetime import datetime, timedelta
 import pandas as pd
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 import httpx
 
@@ -66,6 +68,26 @@ app.add_middleware(
 
 # Viz data directory
 VIZ_DIR = RESULTS_DIR / "viz"
+
+# =============================================================================
+# STATIC FILE SERVING (Production Mode)
+# =============================================================================
+DIST_DIR = Path(__file__).parent.parent.parent / "dist"
+
+if DIST_DIR.exists():
+    print(f"[SERVER] Serving static files from {DIST_DIR.absolute()}")
+    app.mount("/assets", StaticFiles(directory=DIST_DIR / "assets"), name="assets")
+    
+    @app.get("/")
+    async def serve_root():
+        return FileResponse(DIST_DIR / "index.html")
+    
+    @app.exception_handler(404)
+    async def spa_fallback(request, exc):
+        # SPA fallback - serve index.html for client-side routing
+        if not request.url.path.startswith("/api") and not request.url.path.startswith("/runs") and not request.url.path.startswith("/agent"):
+            return FileResponse(DIST_DIR / "index.html")
+        raise exc
 
 
 # =============================================================================
@@ -614,6 +636,16 @@ def build_agent_system_prompt(context: ChatContext, decisions: List[Dict], trade
 
 YOUR PURPOSE: Analyze HISTORICAL data to discover patterns and find trading opportunities. 
 
+=== INTUITIVE EXECUTION (HIGHEST PRIORITY) ===
+1. If user instructions are incomplete (e.g., "Run a trend strategy"), use your BEST JUDGMENT to fill in the blanks.
+2. DO NOT ASK CLARIFYING QUESTIONS about parameters.
+3. Reasonable Defaults:
+   - Strategy: EMA Cross (Trend) or RSI Extreme (Reversion)
+   - Date: 2025-05-01 (or recent available data)
+   - Duration: 2 Weeks
+   - Risk: 2.0 ATR Stop / 4.0 ATR Target
+4. State your assumptions: "Parameters not specified. Running EMA Cross for 2 weeks from May 1st..."
+
 === PRICE-FIRST RULES (CRITICAL) ===
 1. ALWAYS reason from RAW PRICE DATA first, not scanner output.
 2. If a user asks "find opportunities around date X", you MUST:
@@ -873,7 +905,7 @@ async def agent_chat(request: ChatRequest) -> AgentResponse:
                         print(f"[AGENT] Function call: {fn_name}({fn_args})")
                         
                         # Map function calls to UI actions
-                        if fn_name == "run_strategy":
+                        if fn_name == "run_strategy" or fn_name == "run_modular_strategy":
                             # Build modular config from function args
                             config = {
                                 "trigger": {
@@ -977,6 +1009,14 @@ async def lab_agent(request: LabChatRequest):
     lab_system_prompt = """You are a PROACTIVE Research Lab agent for the MLang2 backtesting platform.
 
 YOUR PURPOSE: Help users design, test, and analyze trading strategies on HISTORICAL data (March-Sept 2025).
+
+=== INTUITIVE EXECUTION (HIGHEST PRIORITY) ===
+1. If user instructions are vague (e.g., "Analyze volatility"), use BEST JUDGMENT to execute immediately.
+2. DO NOT ASK CLARIFYING QUESTIONS or say "I can do X, Y, Z". Just DO X (e.g., call evaluate_scan).
+3. Defaults:
+   - Date: 2025-05-01 to 2025-05-14 (Standard 2-week test)
+   - Scan Filters: "rth_only" (Regular session)
+4. State your assumptions clearly: "Analyzing volatility for first 2 weeks of May..."
 
 === CRITICAL: ALWAYS CALL TOOLS ===
 When a user asks ANYTHING about strategies, trades, or analysis, you MUST call a tool. Never just respond with text.

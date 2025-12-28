@@ -65,7 +65,7 @@ from src.core.tool_registry import ToolRegistry, ToolCategory
                 "default": 3.0
             }
         },
-        "required": ["strategy", "start_date", "weeks", "trigger_type", "bracket_type"]
+        "required": ["strategy"]
     },
     produces_artifacts=True,
     artifact_spec={
@@ -137,7 +137,7 @@ class RunStrategyTool:
                 "default": False
             }
         },
-        "required": ["trigger_type", "bracket_type", "start_date", "weeks"]
+        "required": ["trigger_type"]
     },
     produces_artifacts=True,
     artifact_spec={

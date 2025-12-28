@@ -1347,7 +1347,7 @@ def filter_by_regime(signals_df: pd.DataFrame,
                 "default": []
             }
         },
-        "required": ["start_date", "end_date"]
+        "required": []
     }
 )
 class ScanEvaluationTool:
