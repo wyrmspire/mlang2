@@ -28,7 +28,7 @@ export const ChatAgent: React.FC<ChatAgentProps> = ({ runId, currentIndex, curre
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!input.trim() || !runId) return;
+    if (!input.trim()) return;  // Allow chat without run selected
 
     const userMsg: ChatMessage = { role: 'user', content: input };
     setMessages(prev => [...prev, userMsg]);
@@ -84,8 +84,8 @@ export const ChatAgent: React.FC<ChatAgentProps> = ({ runId, currentIndex, curre
               )}
 
               <div className={`px-5 py-3.5 text-sm shadow-md transition-all ${m.role === 'user'
-                  ? 'bg-blue-600 text-white rounded-2xl rounded-tr-sm'
-                  : 'bg-slate-900 text-slate-300 border border-slate-800 rounded-2xl rounded-tl-sm'
+                ? 'bg-blue-600 text-white rounded-2xl rounded-tr-sm'
+                : 'bg-slate-900 text-slate-300 border border-slate-800 rounded-2xl rounded-tl-sm'
                 }`}>
                 {m.role === 'assistant' ? (
                   <div className="prose prose-sm prose-invert max-w-none

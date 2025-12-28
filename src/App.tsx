@@ -37,6 +37,18 @@ const App: React.FC = () => {
   const [indicatorSettings, setIndicatorSettings] = useState<IndicatorSettings>(DEFAULT_INDICATOR_SETTINGS);
 
   // Fast Viz State
+  interface FastVizTrade {
+    entry_time: string;
+    entry_price: number;
+    direction: string;
+    stop_price: number;
+    target_price: number;
+    outcome: string;
+    exit_time?: string;
+    exit_price?: number;
+    pnl_points: number;
+    trigger_name: string;
+  }
   interface FastVizRun {
     run_id: string;
     strategy_name: string;
@@ -44,9 +56,59 @@ const App: React.FC = () => {
     win_rate: number;
     start_date: string;
     end_date: string;
+    trades: FastVizTrade[];
   }
   const [fastVizRuns, setFastVizRuns] = useState<FastVizRun[]>([]);
   const [fastVizEnabled, setFastVizEnabled] = useState<boolean>(false);
+  const [selectedFastVizRunId, setSelectedFastVizRunId] = useState<string | null>(null);
+
+  // Derived State (Moved up for dependencies)
+  const activeDecision = useMemo(() => {
+    if (mode === 'DECISION') {
+      return decisions.find(d => d.index === index) || decisions[index] || null;
+    } else {
+      const trade = trades.find(t => t.index === index);
+      return trade ? decisions.find(d => d.decision_id === trade.decision_id) || null : null;
+    }
+  }, [mode, index, decisions, trades]);
+
+  // Convert Fast Viz trades to chart-compatible decisions
+  const fastVizDecisions = useMemo((): VizDecision[] => {
+    if (!selectedFastVizRunId) return [];
+    const selectedRun = fastVizRuns.find(r => r.run_id === selectedFastVizRunId);
+    if (!selectedRun) return [];
+
+    return selectedRun.trades.map((t, idx) => ({
+      decision_id: `fv_${idx}`,
+      timestamp: t.entry_time,
+      bar_idx: idx,
+      index: idx,
+      scanner_id: t.trigger_name,
+      scanner_context: {},
+      action: 'ENTER',
+      skip_reason: '',
+      current_price: t.entry_price,
+      atr: Math.abs(t.stop_price - t.entry_price),
+      cf_outcome: t.outcome,
+      cf_pnl_dollars: t.pnl_points * 5, // MES = $5/point
+      oco: {
+        entry_price: t.entry_price,
+        stop_price: t.stop_price,
+        tp_price: t.target_price,
+        entry_type: 'MARKET',
+        direction: t.direction,
+        reference_type: 'atr',
+        reference_value: 0,
+        atr_at_creation: Math.abs(t.stop_price - t.entry_price),
+        max_bars: 200,
+        stop_atr: 2.0,
+        tp_multiple: 3.0
+      }
+    }));
+  }, [selectedFastVizRunId, fastVizRuns]);
+
+  // Effective decisions (use Fast Viz if selected, otherwise regular)
+  const effectiveDecisions = selectedFastVizRunId ? fastVizDecisions : decisions;
 
   // Load continuous contract data
   useEffect(() => {
@@ -55,8 +117,8 @@ const App: React.FC = () => {
     let startDate: string | undefined;
     let endDate: string | undefined;
 
-    if (decisions.length > 0) {
-      const timestamps = decisions
+    if (effectiveDecisions.length > 0) {
+      const timestamps = effectiveDecisions
         .map(d => d.timestamp)
         .filter((t): t is string => !!t)
         .sort();
@@ -74,7 +136,7 @@ const App: React.FC = () => {
       console.error('Failed to load continuous data:', err);
       setContinuousLoading(false);
     });
-  }, [decisions]);
+  }, [effectiveDecisions]);
 
   // Load run-specific data
   useEffect(() => {
@@ -89,16 +151,6 @@ const App: React.FC = () => {
       });
     }
   }, [currentRun]);
-
-  // Derived State
-  const activeDecision = useMemo(() => {
-    if (mode === 'DECISION') {
-      return decisions.find(d => d.index === index) || decisions[index] || null;
-    } else {
-      const trade = trades.find(t => t.index === index);
-      return trade ? decisions.find(d => d.decision_id === trade.decision_id) || null : null;
-    }
-  }, [mode, index, decisions, trades]);
 
   const activeTrade = useMemo(() => {
     if (mode === 'TRADE') {
@@ -146,14 +198,20 @@ const App: React.FC = () => {
             action.payload.end_date,
             action.payload.run_name
           );
-          setFastVizRuns(prev => [...prev, {
+          const newRun: FastVizRun = {
             run_id: fvResult.run_id,
             strategy_name: fvResult.strategy_name,
             total_trades: fvResult.total_trades,
             win_rate: fvResult.win_rate,
             start_date: fvResult.start_date,
-            end_date: fvResult.end_date
-          }]);
+            end_date: fvResult.end_date,
+            trades: fvResult.trades || []
+          };
+          setFastVizRuns(prev => [...prev, newRun]);
+          // Auto-select the new Fast Viz run to show on chart
+          setSelectedFastVizRunId(fvResult.run_id);
+          // Clear regular run selection when viewing Fast Viz
+          setCurrentRun(null);
         } catch (e) {
           console.error('Failed to run Fast Viz:', e);
         }
@@ -323,7 +381,17 @@ const App: React.FC = () => {
             {fastVizRuns.length > 0 && (
               <div className="space-y-2 mt-2">
                 {fastVizRuns.map((run) => (
-                  <div key={run.run_id} className="flex items-center justify-between bg-slate-950 rounded px-2 py-1.5 border border-amber-700/30">
+                  <div
+                    key={run.run_id}
+                    onClick={() => {
+                      setSelectedFastVizRunId(run.run_id);
+                      setCurrentRun(null); // Clear regular run when viewing Fast Viz
+                    }}
+                    className={`flex items-center justify-between rounded px-2 py-1.5 border cursor-pointer transition-colors ${selectedFastVizRunId === run.run_id
+                      ? 'bg-amber-900/30 border-amber-500/50'
+                      : 'bg-slate-950 border-amber-700/30 hover:bg-amber-900/20'
+                      }`}
+                  >
                     <div className="flex-1 min-w-0">
                       <div className="text-xs text-amber-300 truncate">{run.strategy_name}</div>
                       <div className="text-[10px] text-slate-500">{run.total_trades} trades • {run.win_rate.toFixed(1)}%</div>
@@ -421,8 +489,8 @@ const App: React.FC = () => {
       <div className="flex-1 flex flex-col min-w-0 h-full relative bg-slate-900/50">
 
         {/* Stats Panel (Moved Back to Top of Main Content) */}
-        {currentRun && (
-          <StatsPanel decisions={decisions} startingBalance={50000} />
+        {(currentRun || selectedFastVizRunId) && (
+          <StatsPanel decisions={effectiveDecisions} startingBalance={50000} />
         )}
 
         {/* Chart Top (Flex Grow) */}
@@ -434,7 +502,7 @@ const App: React.FC = () => {
 
           <CandleChart
             continuousData={continuousData}
-            decisions={decisions}
+            decisions={effectiveDecisions}
             activeDecision={activeDecision}
             trade={activeTrade}
             trades={trades}

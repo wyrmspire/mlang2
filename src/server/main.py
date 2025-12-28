@@ -598,9 +598,9 @@ GEMINI_MODEL = "gemini-2.0-flash-exp"
 # =============================================================================
 
 def get_agent_tools() -> List[Dict[str, Any]]:
-    """Get tools for main agent (strategy + utility + indicators)."""
+    """Get tools for main TradeViz agent (strategy + indicators only, NOT lab analysis tools)."""
     return ToolRegistry.get_gemini_function_declarations(
-        categories=[ToolCategory.STRATEGY, ToolCategory.UTILITY, ToolCategory.INDICATOR]
+        categories=[ToolCategory.STRATEGY, ToolCategory.INDICATOR]
     )
 
 
@@ -706,25 +706,20 @@ CURRENT CONTEXT:
 CURRENT {item_type.upper()} DATA:
 {current_json}
 
-=== PRIMARY TOOLS (Use These First) ===
-- evaluate_scan: Realistically backtest any scan with win rate and EV
-- cluster_trades: Group trades by time of day, session, day of week
-- compare_trade_pools: Compare morning vs afternoon, etc.
-- detect_regime: Identify TREND/RANGE/SPIKE days
-- find_price_opportunities: Find clean trades from RAW PRICE
-- describe_price_action: Narrative of what price did
-- study_obvious_trades: Complete "obvious winners" workflow
+=== YOUR TOOLS (TradeViz Agent Only) ===
+- run_strategy / run_modular_strategy: Execute a strategy scan and create viz artifacts
+- set_index: Navigate to a specific decision/trade index
+- set_mode: Switch between DECISION and TRADE views
+- load_run: Load a different run by ID
+- list_runs: Get list of available runs
 
-=== SECONDARY TOOLS ===
-- explore_strategy: Run parameter sweeps
-- run_composite_strategy: Execute a backtest with visualization
-- get_session_context: RTH/Globex, ORH/ORL context
+=== WORKFLOW FOR STRATEGY REQUESTS ===
+1. When user asks to "run", "scan", or "test" a strategy, call run_strategy or run_modular_strategy
+2. Use trigger_type to specify the entry condition (ema_cross, rsi_threshold, etc.)
+3. The strategy will create a new run visible in the run picker
 
-=== WORKFLOW FOR "FIND OPPORTUNITIES" REQUESTS ===
-1. Call describe_price_action for a wide date range
-2. Call find_price_opportunities to identify clean trades
-3. Call evaluate_scan if user wants win rates
-4. Present a FORMATTED summary with tables and verdict
+NOTE: You are the TradeViz agent. For analysis tasks like "evaluate scan", "cluster trades", 
+or "find opportunities", direct the user to the Lab page (🔬 icon).
 
 NEVER answer "no signals fired" or just dump JSON as a final answer.
 Always provide INSIGHT and INTERPRETATION."""

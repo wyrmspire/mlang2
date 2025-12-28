@@ -103,6 +103,34 @@ def detect_entries_vectorized(df: pd.DataFrame, trigger_config: Dict[str, Any]) 
         signals.loc[short_signals, "signal"] = True
         signals.loc[short_signals, "direction"] = "SHORT"
         
+    elif trigger_type in ("vwap_bounce", "ema_bounce"):
+        # VWAP/EMA bounce detection: price crosses above indicator after being below
+        if trigger_type == "vwap_bounce":
+            # Calculate VWAP (cumulative price*volume / cumulative volume)
+            if "volume" in df.columns:
+                df["_vwap"] = (df["close"] * df["volume"]).cumsum() / df["volume"].cumsum()
+            else:
+                # Fallback to 20-period EMA if no volume
+                df["_vwap"] = df["close"].ewm(span=20, adjust=False).mean()
+            indicator = df["_vwap"]
+        else:
+            # EMA bounce uses 21-period EMA
+            period = trigger_config.get("period", 21)
+            indicator = df["close"].ewm(span=period, adjust=False).mean()
+        
+        # Long: price was below indicator, now bouncing above
+        close_above = df["close"] > indicator
+        was_below = df["close"].shift(1) <= indicator.shift(1)
+        signals["signal"] = close_above & was_below
+        signals["direction"] = "LONG"
+        
+        # Short: price was above indicator, now bouncing below
+        close_below = df["close"] < indicator
+        was_above = df["close"].shift(1) >= indicator.shift(1)
+        short_signals = close_below & was_above
+        signals.loc[short_signals, "signal"] = True
+        signals.loc[short_signals, "direction"] = "SHORT"
+        
     elif trigger_type == "time":
         hour = trigger_config.get("hour", 9)
         minute = trigger_config.get("minute", 30)
@@ -229,7 +257,7 @@ def fast_viz_strategy(
         high_close = (df["high"] - df["close"].shift(1)).abs()
         low_close = (df["low"] - df["close"].shift(1)).abs()
         tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
-        df["atr"] = tr.rolling(window=atr_period).mean()
+        df["atr"] = tr.rolling(window=atr_period).mean().fillna(5.0)  # Fill NaN with default
     else:
         df["atr"] = 5.0  # Default fixed
     
@@ -259,10 +287,14 @@ def fast_viz_strategy(
         last_entry_idx = idx
         
         row = df.iloc[idx]
-        entry_price = row["close"]
+        entry_price = float(row["close"])
         direction = signals.loc[idx, "direction"]
-        confidence = signals.loc[idx, "confidence"]
-        atr = row.get("atr", 5.0)
+        confidence = float(signals.loc[idx, "confidence"])
+        atr = float(row.get("atr", 5.0))
+        
+        # Skip if ATR is NaN or invalid
+        if pd.isna(atr) or atr <= 0:
+            atr = 5.0
         
         stop_points = atr * stop_mult
         target_points = atr * tp_mult
@@ -279,18 +311,24 @@ def fast_viz_strategy(
             df, idx, entry_price, direction, stop_points, target_points
         )
         
+        # Sanitize float values to prevent NaN in JSON
+        def safe_float(val, default=0.0):
+            if val is None or (isinstance(val, float) and (pd.isna(val) or np.isinf(val))):
+                return default
+            return float(val)
+        
         trade = FastVizTrade(
             entry_time=str(row.get("time", f"bar_{idx}")),
-            entry_price=entry_price,
+            entry_price=safe_float(entry_price),
             direction=direction,
-            stop_price=stop_price,
-            target_price=target_price,
+            stop_price=safe_float(stop_price),
+            target_price=safe_float(target_price),
             outcome=outcome_info["outcome"],
             exit_time=outcome_info["exit_time"],
-            exit_price=outcome_info["exit_price"],
-            pnl_points=outcome_info["pnl_points"],
+            exit_price=safe_float(outcome_info["exit_price"]) if outcome_info["exit_price"] else None,
+            pnl_points=safe_float(outcome_info["pnl_points"]),
             trigger_name=trigger_name,
-            confidence=confidence
+            confidence=safe_float(confidence, 0.5)
         )
         trades.append(trade)
     
