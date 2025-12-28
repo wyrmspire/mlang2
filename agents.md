@@ -148,3 +148,48 @@ Does this maintain artifact compatibility?
 Does replay still produce identical results?
 
 Can this be explained to a trader clearly?
+
+---
+
+## How to Interact with Agents
+
+### 1. Terminal Chat (Direct Interaction & Role-play)
+The primary way to interact with agents outside the UI is via the `scripts/agent_chat.py` script. This allows you to chat with either the **Lab Agent** or the **TradeViz Agent** directly from your terminal.
+
+*   **To chat with the Lab Agent (Analysis Expert):**
+    ```bash
+    python scripts/agent_chat.py --agent lab
+    ```
+*   **To chat with the TradeViz Agent (Strategy Executor):**
+    ```bash
+    python scripts/agent_chat.py --agent tradeviz
+    ```
+
+**Role-play Tip:** You can pipe instructions to test intuition:
+```bash
+echo "Run a simple trend strategy" | python scripts/agent_chat.py --agent tradeviz
+```
+
+### 2. Backend API Interaction
+The agents reside in the FastAPI backend and can be reached via `curl` or any HTTP client. This is how the UI communicates with them.
+
+*   **TradeViz Agent Contextual Chat:**
+    ```bash
+    curl -X POST http://localhost:8000/agent/chat \
+         -H "Content-Type: application/json" \
+         -d '{"messages": [{"role": "user", "content": "Run a trend strategy"}], "context": {"runId": "", "currentIndex": 0, "currentMode": "exploration"}}'
+    ```
+
+*   **Lab Agent Research Chat:**
+    ```bash
+    curl -X POST http://localhost:8000/lab/agent \
+         -H "Content-Type: application/json" \
+         -d '{"messages": [{"role": "user", "content": "Analyze June volatility"}]}'
+    ```
+
+### 3. Role-play Files & Structure
+If you want to understand how the agents "think" or modify their behavior, these are the key files:
+- **Prompt Logic:** `src/server/main.py` (Functions: `build_agent_system_prompt` and `GENERIC_LAB_PROMPT`)
+- **Tool Catalog:** `src/tools/agent_tools.py` (TradeViz tools) and `src/tools/price_analysis_tools.py` (Lab tools)
+- **Execution Script:** `scripts/agent_chat.py` (The terminal interface used for role-playing)
+- **Intuition Defaults:** Described in `chat.md` stress test results.

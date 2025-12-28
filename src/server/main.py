@@ -56,6 +56,10 @@ app.include_router(infer_router)
 from src.server.db_routes import router as db_router
 app.include_router(db_router)
 
+# Mount Fast Viz router
+from src.server.fast_viz_routes import router as fast_viz_router
+app.include_router(fast_viz_router)
+
 
 # CORS for frontend
 app.add_middleware(
@@ -988,6 +992,7 @@ async def agent_chat(request: ChatRequest) -> AgentResponse:
 
 class LabChatRequest(BaseModel):
     messages: List[ChatMessage]
+    planner_mode: bool = False
 
 # Lab tools now use dynamic catalog (Phase 9 complete)
 
@@ -1017,6 +1022,42 @@ YOUR PURPOSE: Help users design, test, and analyze trading strategies on HISTORI
    - Date: 2025-05-01 to 2025-05-14 (Standard 2-week test)
    - Scan Filters: "rth_only" (Regular session)
 4. State your assumptions clearly: "Analyzing volatility for first 2 weeks of May..."
+"""
+    
+    # Inject Planner Mode prompt if enabled
+    if request.planner_mode:
+        lab_system_prompt += """
+
+=== PLANNER MODE (ACTIVE) ===
+You are in PLANNER MODE. Instead of executing tools immediately, you MUST:
+
+1. **Analyze the request** and break it into logical steps.
+2. **Output a structured plan** as a JSON object:
+   ```json
+   {
+     "plan_overview": "Brief description of what you will accomplish",
+     "steps": [
+       {"step": 1, "tool": "tool_name", "description": "What this does", "args": {...}},
+       {"step": 2, "tool": "tool_name", "description": "What this does", "args": {...}}
+     ]
+   }
+   ```
+3. **DO NOT execute any tools**. Just return the plan.
+4. The user will review and click "Execute All" to run the plan.
+
+Example for "Compare morning vs afternoon volatility":
+```json
+{
+  "plan_overview": "Analyze volatility patterns by clustering trades into morning and afternoon sessions, then comparing their performance.",
+  "steps": [
+    {"step": 1, "tool": "cluster_trades", "description": "Group trades by session", "args": {"cluster_by": "session", "start_date": "2025-05-01", "end_date": "2025-05-14"}},
+    {"step": 2, "tool": "compare_trade_pools", "description": "Compare morning vs afternoon", "args": {"pool_a": "morning", "pool_b": "afternoon"}}
+  ]
+}
+```
+"""
+    else:
+        lab_system_prompt += """
 
 === CRITICAL: ALWAYS CALL TOOLS ===
 When a user asks ANYTHING about strategies, trades, or analysis, you MUST call a tool. Never just respond with text.

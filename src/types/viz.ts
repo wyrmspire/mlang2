@@ -100,7 +100,7 @@ export interface ChatMessage {
   content: string;
 }
 
-export type UIActionType = 'SET_INDEX' | 'SET_FILTER' | 'SET_MODE' | 'LOAD_RUN' | 'RUN_STRATEGY' | 'START_REPLAY' | 'TRAIN_FROM_SCAN';
+export type UIActionType = 'SET_INDEX' | 'SET_FILTER' | 'SET_MODE' | 'LOAD_RUN' | 'RUN_STRATEGY' | 'RUN_FAST_VIZ' | 'START_REPLAY' | 'TRAIN_FROM_SCAN';
 
 export interface UIAction {
   type: UIActionType;

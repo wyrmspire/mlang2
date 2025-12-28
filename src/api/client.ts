@@ -145,7 +145,7 @@ export const api = {
         }
     },
 
-    postLabAgent: async (messages: ChatMessage[]): Promise<any> => {
+    postLabAgent: async (messages: ChatMessage[], plannerMode: boolean = false): Promise<any> => {
         const hasBackend = await checkBackend();
         if (!hasBackend) {
             return { reply: 'Backend not connected. Start with: ./start.sh' };
@@ -154,7 +154,7 @@ export const api = {
             const response = await fetch(`${API_BASE}/lab/agent`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ messages }),
+                body: JSON.stringify({ messages, planner_mode: plannerMode }),
             });
             if (!response.ok) return { reply: 'Error contacting lab agent.' };
             return response.json();
@@ -294,6 +294,70 @@ export const api = {
         if (!hasBackend) throw new Error('Backend unavailable');
         const response = await fetch(`${API_BASE}/experiments/${runId}/visualize`, { method: 'POST' });
         if (!response.ok) throw new Error('Failed to visualize experiment');
+        return response.json();
+    },
+
+    // Fast Viz API
+    runFastViz: async (config: any, startDate: string, endDate: string, runName?: string): Promise<any> => {
+        const hasBackend = await checkBackend();
+        if (!hasBackend) throw new Error('Backend unavailable');
+        const response = await fetch(`${API_BASE}/fast-viz/run`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ config, start_date: startDate, end_date: endDate, run_name: runName })
+        });
+        if (!response.ok) throw new Error('Failed to run Fast Viz');
+        return response.json();
+    },
+
+    listFastVizRuns: async (): Promise<any> => {
+        const hasBackend = await checkBackend();
+        if (!hasBackend) throw new Error('Backend unavailable');
+        const response = await fetch(`${API_BASE}/fast-viz/list`);
+        if (!response.ok) throw new Error('Failed to list Fast Viz runs');
+        return response.json();
+    },
+
+    getFastVizRun: async (runId: string): Promise<any> => {
+        const hasBackend = await checkBackend();
+        if (!hasBackend) throw new Error('Backend unavailable');
+        const response = await fetch(`${API_BASE}/fast-viz/${runId}`);
+        if (!response.ok) throw new Error('Failed to get Fast Viz run');
+        return response.json();
+    },
+
+    deleteFastVizRun: async (runId: string): Promise<any> => {
+        const hasBackend = await checkBackend();
+        if (!hasBackend) throw new Error('Backend unavailable');
+        const response = await fetch(`${API_BASE}/fast-viz/${runId}`, { method: 'DELETE' });
+        if (!response.ok) throw new Error('Failed to delete Fast Viz run');
+        return response.json();
+    },
+
+    saveFastVizRun: async (runId: string): Promise<any> => {
+        const hasBackend = await checkBackend();
+        if (!hasBackend) throw new Error('Backend unavailable');
+        const response = await fetch(`${API_BASE}/fast-viz/save/${runId}`, { method: 'POST' });
+        if (!response.ok) throw new Error('Failed to save Fast Viz run');
+        return response.json();
+    },
+
+    addToFastViz: async (triggerType: string, triggerParams: any, startDate: string, endDate: string, stopAtr: number = 2.0, tpAtr: number = 3.0): Promise<any> => {
+        const hasBackend = await checkBackend();
+        if (!hasBackend) throw new Error('Backend unavailable');
+        const response = await fetch(`${API_BASE}/fast-viz/add`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                trigger_type: triggerType,
+                trigger_params: triggerParams,
+                start_date: startDate,
+                end_date: endDate,
+                stop_atr: stopAtr,
+                tp_atr: tpAtr
+            })
+        });
+        if (!response.ok) throw new Error('Failed to add to Fast Viz');
         return response.json();
     }
 };

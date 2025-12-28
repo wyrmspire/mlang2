@@ -36,6 +36,7 @@ export const LabPage: React.FC<LabPageProps> = ({ onLoadRun }) => {
     const [loading, setLoading] = useState(false);
     const [currentResult, setCurrentResult] = useState<LabResult | null>(null);
     const scrollRef = useRef<HTMLDivElement>(null);
+    const [plannerMode, setPlannerMode] = useState<boolean>(false);
 
     useEffect(() => {
         if (scrollRef.current) {
@@ -53,7 +54,7 @@ export const LabPage: React.FC<LabPageProps> = ({ onLoadRun }) => {
         setLoading(true);
 
         try {
-            const response = await api.postLabAgent([...messages, userMsg]);
+            const response = await api.postLabAgent([...messages, userMsg], plannerMode);
             const assistantMsg: Message = {
                 role: 'assistant',
                 content: response.reply || 'Processing...',
@@ -186,8 +187,17 @@ export const LabPage: React.FC<LabPageProps> = ({ onLoadRun }) => {
                     <span className="text-2xl">🔬</span>
                     <h1 className="text-xl font-bold text-white">Research Lab</h1>
                 </div>
-                <div className="text-sm text-slate-400">
-                    AI-Powered Strategy Research
+                <div className="flex items-center gap-4">
+                    <label className="flex items-center gap-2 text-sm text-slate-400 cursor-pointer hover:text-purple-400 transition-colors">
+                        <input
+                            type="checkbox"
+                            checked={plannerMode}
+                            onChange={(e) => setPlannerMode(e.target.checked)}
+                            className="w-4 h-4 rounded accent-purple-500"
+                        />
+                        <span>🗓️ Planner Mode</span>
+                    </label>
+                    <span className="text-sm text-slate-500">AI-Powered Strategy Research</span>
                 </div>
             </div>
 
