@@ -458,8 +458,9 @@ def run_strategy_scan(
         exporter.on_bracket_created(decision_id, oco_bracket, contracts=contracts)
         
         # === REQUIRED EXPORTER HOOK 3: on_trade_closed ===
+        # NOTE: cf.bars_held is in 1-minute bars (since counterfactual runs on df_1m)
         exit_bar = bar_idx + int(cf.bars_held)
-        exit_time = bar_time + pd.Timedelta(minutes=int(cf.bars_held) * (5 if timeframe == '5m' else 15 if timeframe == '15m' else 1))
+        exit_time = bar_time + pd.Timedelta(minutes=int(cf.bars_held))  # 1 min per bar since CF uses 1m data
         
         # Use centralized PnL calculation (SINGLE source of truth)
         pnl_points, pnl_dollars = calculate_pnl_dollars(

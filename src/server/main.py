@@ -307,20 +307,28 @@ async def get_continuous_contract(
     Use start/end params to specify a custom range.
     """
     import pandas as pd
-    from datetime import timedelta
+    from datetime import timedelta, datetime
+    
+    # Determine date range for efficient loading
+    load_start = None
+    load_end = None
+    
+    if start:
+        load_start = start
+    if end:
+        load_end = end
+    
+    # Default to last 4 weeks if no filters
+    if not start and not end:
+        # Use current date minus 4 weeks as default
+        load_end = datetime.now().strftime('%Y-%m-%d')
+        load_start = (datetime.now() - timedelta(weeks=4)).strftime('%Y-%m-%d')
     
     try:
-        df = load_continuous_contract()
+        # Load with date filtering at source for efficiency
+        df = load_continuous_contract(start_date=load_start, end_date=load_end)
     except Exception as e:
         raise HTTPException(500, f"Failed to load continuous contract: {str(e)}")
-    
-    # Default date range: last 4 weeks if no filters provided
-    if not start and not end:
-        # Get the most recent 4 weeks of data by default
-        if len(df) > 0:
-            latest_time = df['time'].max()
-            default_start = latest_time - timedelta(weeks=4)
-            df = df[df['time'] >= default_start]
     
     # Apply date filters if provided
     if start:
