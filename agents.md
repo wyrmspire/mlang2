@@ -37,6 +37,14 @@ This prevents Jules from “optimizing” the wrong things.
    - `find_price_opportunities` - Find clean swing trades from raw OHLCV
    - `describe_price_action` - Narrative of price behavior
    - `propose_trade` - Entry/stop/target from structure
+   - `study_obvious_trades` - Complete "obvious winners" workflow
+   - `cluster_trades` - Group by time of day, session, day of week
+   - `compare_trade_pools` - Morning vs afternoon comparisons
+   - `detect_regime` - TREND_UP/DOWN, RANGE, SPIKE_CHANNEL
+   - `trade_fingerprint` - State vector for pattern matching
+   - `indicator_impact` - "Would VWAP filter help?"
+   - `find_killer_moves` - Biggest opportunities in a range
+   - `synthesize_scan` - Auto-generate scanner spec from trades
 
 ### Workflow for "Find Opportunities" Requests
 1. `describe_price_action` for wide date range (e.g., full month)
@@ -44,6 +52,11 @@ This prevents Jules from “optimizing” the wrong things.
 3. `propose_trade` on the best 2-3 setups
 4. Present narrative: "Price did X, cleanest trades were Y"
 5. **Optionally** correlate with scanners if relevant
+
+### Workflow for "Compare X vs Y" Requests
+1. `cluster_trades` to group by the relevant dimension
+2. `compare_trade_pools` for structured comparison
+3. Present insights with winner and reason
 
 ### Never Block Analysis
 If asked about trading opportunities, you MUST provide analysis. Fallback chain:
