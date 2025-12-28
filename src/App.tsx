@@ -30,7 +30,7 @@ const App: React.FC = () => {
   const [trades, setTrades] = useState<VizTrade[]>([]);
 
   // Layout State
-  const [chatHeight, setChatHeight] = useState<number>(300);
+  const [chatHeight, setChatHeight] = useState<number>(320);
   const isResizingRef = useRef(false);
 
   // Indicator Settings State
@@ -160,18 +160,50 @@ const App: React.FC = () => {
     setChatHeight(constrained);
   };
 
+  const PageHeader = ({ title, backButton }: { title: string, backButton?: boolean }) => (
+    <div className="h-16 flex items-center justify-between px-6 bg-slate-950 border-b border-slate-800 shrink-0 z-20">
+      <div className="flex items-center gap-6">
+        {backButton && (
+           <button
+             onClick={() => setCurrentPage('trade')}
+             className="flex items-center gap-2 text-slate-400 hover:text-white transition-colors px-3 py-1.5 rounded-md hover:bg-slate-800 text-sm font-medium"
+           >
+             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" /></svg>
+             Back
+           </button>
+        )}
+        <h1 className="font-bold text-slate-100 text-lg tracking-tight flex items-center gap-3">
+          <span className="bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-indigo-400">Trade Viz</span>
+          <span className="text-slate-600 text-sm font-normal">/</span>
+          <span className="text-slate-300 font-normal">{title}</span>
+        </h1>
+      </div>
+       <div className="flex items-center gap-2">
+            {!backButton && (
+                <>
+                  <button
+                    onClick={() => setCurrentPage('lab')}
+                    className="flex items-center gap-2 px-3 py-1.5 rounded-md text-slate-400 hover:text-emerald-400 hover:bg-emerald-500/10 transition-all text-sm font-medium"
+                  >
+                    <span>🔬 Lab</span>
+                  </button>
+                  <button
+                    onClick={() => setCurrentPage('experiments')}
+                    className="flex items-center gap-2 px-3 py-1.5 rounded-md text-slate-400 hover:text-blue-400 hover:bg-blue-500/10 transition-all text-sm font-medium"
+                  >
+                     <span>🧪 Experiments</span>
+                  </button>
+                </>
+            )}
+       </div>
+    </div>
+  );
+
   // If Lab page is active, render it instead
   if (currentPage === 'lab') {
     return (
-      <div className="flex flex-col h-screen w-full bg-slate-900 overflow-hidden text-slate-100 font-sans">
-        <div className="h-14 flex items-center gap-4 px-6 bg-slate-850/80 backdrop-blur border-b border-slate-800 shrink-0">
-          <button
-            onClick={() => setCurrentPage('trade')}
-            className="flex items-center gap-2 text-slate-400 hover:text-white transition-colors px-3 py-1.5 rounded-md hover:bg-slate-800"
-          >
-            <span>←</span> Back to Trade View
-          </button>
-        </div>
+      <div className="flex flex-col h-screen w-full bg-slate-950 overflow-hidden text-slate-100 font-sans">
+        <PageHeader title="Strategy Lab" backButton />
         <div className="flex-1 overflow-hidden min-h-0 bg-slate-900">
           <LabPage
             onLoadRun={(runId: string) => {
@@ -187,15 +219,8 @@ const App: React.FC = () => {
   // If Experiments page is active
   if (currentPage === 'experiments') {
     return (
-      <div className="flex flex-col h-screen w-full bg-slate-900 overflow-hidden text-slate-100 font-sans">
-        <div className="h-14 flex items-center gap-4 px-6 bg-slate-850/80 backdrop-blur border-b border-slate-800 shrink-0">
-          <button
-            onClick={() => setCurrentPage('trade')}
-            className="flex items-center gap-2 text-slate-400 hover:text-white transition-colors px-3 py-1.5 rounded-md hover:bg-slate-800"
-          >
-            <span>←</span> Back to Trade View
-          </button>
-        </div>
+      <div className="flex flex-col h-screen w-full bg-slate-950 overflow-hidden text-slate-100 font-sans">
+         <PageHeader title="Experiments" backButton />
         <div className="flex-1 overflow-hidden min-h-0 bg-slate-900">
           <ExperimentsView
             onLoadRun={(runId: string) => {
@@ -210,46 +235,40 @@ const App: React.FC = () => {
 
   // Trade View (default)
   return (
-    <div className="flex h-screen w-full bg-slate-900 text-slate-100 font-sans overflow-hidden">
+    <div className="flex h-screen w-full bg-slate-950 text-slate-100 font-sans overflow-hidden">
 
-      {/* LEFT SIDEBAR - Expanded Width */}
-      <div className="w-96 flex flex-col border-r border-slate-800 bg-slate-950 shrink-0 shadow-xl z-20">
+      {/* LEFT SIDEBAR - Modernized */}
+      <div className="w-80 flex flex-col border-r border-slate-800 bg-slate-950 shrink-0 shadow-2xl z-20">
 
         {/* Header */}
-        <div className="h-16 flex items-center justify-between px-6 border-b border-slate-800 shrink-0 bg-slate-950">
-          <div className="flex items-center gap-4">
-            <h1 className="font-bold text-white text-xl tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-teal-400">Trade Viz</h1>
-            <div className="flex gap-2">
-              <button
-                onClick={() => setCurrentPage('lab')}
-                className="text-slate-400 hover:text-green-400 hover:bg-green-400/10 transition-all p-2 rounded-md"
-                title="Lab"
-              >
-                🔬
-              </button>
-              <button
-                onClick={() => setCurrentPage('experiments')}
-                className="text-slate-400 hover:text-blue-400 hover:bg-blue-400/10 transition-all p-2 rounded-md"
-                title="Experiments"
-              >
-                🧪
-              </button>
-            </div>
-          </div>
-          <button
-            onClick={() => {
-              setSimulationMode('SIMULATION');
-              setShowSimulation(true);
-            }}
-            className="flex items-center justify-center w-8 h-8 rounded-full bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white shadow-lg shadow-purple-900/20 transition-all transform hover:scale-105"
-            title="Replay"
-          >
-            ▶
-          </button>
+        <div className="h-16 flex items-center justify-between px-5 border-b border-slate-800 shrink-0 bg-slate-950">
+           <div className="flex items-center gap-2 font-bold text-lg tracking-tight">
+               <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white shadow-lg shadow-blue-500/20">
+                   <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" /></svg>
+               </div>
+               <span className="text-slate-100">Trade<span className="text-blue-500">Viz</span></span>
+           </div>
+
+           <div className="flex gap-1">
+               <button
+                 onClick={() => setCurrentPage('lab')}
+                 className="p-2 rounded-md text-slate-400 hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors"
+                 title="Strategy Lab"
+               >
+                 <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19.428 15.428a2 2 0 00-1.022-.547l-2.384-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" /></svg>
+               </button>
+               <button
+                 onClick={() => setCurrentPage('experiments')}
+                 className="p-2 rounded-md text-slate-400 hover:text-blue-400 hover:bg-blue-500/10 transition-colors"
+                 title="Experiments"
+               >
+                 <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z" /></svg>
+               </button>
+           </div>
         </div>
 
         {/* Scrollable Content */}
-        <div className="flex-1 overflow-y-auto overflow-x-hidden p-4 space-y-6 custom-scrollbar">
+        <div className="flex-1 overflow-y-auto overflow-x-hidden p-4 space-y-6 custom-scrollbar bg-slate-950">
 
           <RunPicker onSelect={setCurrentRun} />
 
@@ -262,45 +281,57 @@ const App: React.FC = () => {
           />
 
           {!currentRun ? (
-            <div className="p-8 text-sm text-slate-500 text-center border border-dashed border-slate-800 rounded-lg bg-slate-900/50">
-              <p>Select a run above to see details.</p>
+            <div className="p-6 text-center border border-dashed border-slate-800 rounded-lg bg-slate-900/30">
+               <div className="text-4xl mb-2 opacity-20">👋</div>
+              <p className="text-sm text-slate-500">Select a run above to start analyzing decisions and trades.</p>
             </div>
           ) : (
             <>
               {/* Details Panel - Stays in Sidebar */}
-              <div className="border border-slate-800 rounded-lg overflow-hidden shadow-sm bg-slate-900/50">
-                <div className="bg-slate-800/50 px-4 py-2 text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-2">
-                  <span className="w-2 h-2 rounded-full bg-blue-500"></span>
-                  Decision Context
-                </div>
-                <div className="bg-slate-900/30">
-                  <DetailsPanel decision={activeDecision} trade={activeTrade} />
-                </div>
+              <div className="flex flex-col gap-2">
+                 <div className="flex items-center justify-between px-1">
+                     <span className="text-[10px] uppercase tracking-wider font-bold text-slate-500">Context</span>
+                 </div>
+                 <div className="border border-slate-800 rounded-lg overflow-hidden shadow-sm bg-slate-900/30">
+                   <DetailsPanel decision={activeDecision} trade={activeTrade} />
+                 </div>
               </div>
 
               <div className="flex justify-between items-center text-[10px] text-slate-600 px-2 font-mono uppercase tracking-wider">
-                <span>📊 {continuousData?.count?.toLocaleString() || 0} bars</span>
-                <span>📍 {decisions.length} decisions / {trades.length} trades</span>
+                <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-slate-700"></span> {continuousData?.count?.toLocaleString() || 0} bars</span>
+                <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-slate-700"></span> {decisions.length} decisions</span>
               </div>
             </>
           )}
         </div>
+
+        {/* Play Button Footer */}
+        <div className="p-4 border-t border-slate-800 bg-slate-950">
+             <button
+            onClick={() => {
+              setSimulationMode('SIMULATION');
+              setShowSimulation(true);
+            }}
+            className="w-full flex items-center justify-center gap-2 py-3 rounded-lg bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white shadow-lg shadow-blue-900/20 transition-all transform hover:translate-y-[-1px] active:translate-y-[1px] font-bold text-sm tracking-wide"
+          >
+            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clipRule="evenodd" /></svg>
+            Replay Session
+          </button>
+        </div>
       </div>
 
       {/* MAIN CONTENT - Vertical Layout */}
-      <div className="flex-1 flex flex-col min-w-0 h-full relative bg-slate-900">
+      <div className="flex-1 flex flex-col min-w-0 h-full relative bg-slate-900/50">
 
         {/* Stats Panel (Moved Back to Top of Main Content) */}
         {currentRun && (
-          <div className="shrink-0 border-b border-slate-800 bg-slate-900 z-10 shadow-sm">
             <StatsPanel decisions={decisions} startingBalance={50000} />
-          </div>
         )}
 
         {/* Chart Top (Flex Grow) */}
         <div className="flex-1 min-h-0 relative bg-slate-900">
           {/* Indicator Settings - Top LEFT of chart */}
-          <div className="absolute top-2 left-2 z-30">
+          <div className="absolute top-4 left-4 z-30">
             <IndicatorSettingsPanel settings={indicatorSettings} onChange={setIndicatorSettings} />
           </div>
 
@@ -316,14 +347,14 @@ const App: React.FC = () => {
 
         {/* Resizer Handle */}
         <div
-          className="h-1 bg-slate-950 hover:bg-blue-500/50 cursor-row-resize shrink-0 flex items-center justify-center transition-all duration-300 border-y border-slate-800 relative group z-30"
+          className="h-1 bg-slate-950 hover:bg-blue-500/50 cursor-row-resize shrink-0 flex items-center justify-center transition-all duration-300 border-t border-slate-800 relative group z-30"
           onMouseDown={startResizing}
         >
           <div className="w-16 h-1 bg-slate-700 rounded-full group-hover:bg-blue-400 transition-colors opacity-50 group-hover:opacity-100" />
         </div>
 
         {/* Chat Bottom (Fixed Height) */}
-        <div style={{ height: chatHeight }} className="shrink-0 bg-slate-950 border-t border-slate-800 shadow-[0_-4px_20px_-5px_rgba(0,0,0,0.3)] z-20">
+        <div style={{ height: chatHeight }} className="shrink-0 bg-slate-950 border-t border-slate-800 shadow-[0_-8px_30px_rgba(0,0,0,0.5)] z-20">
           <ChatAgent
             runId={currentRun || 'none'}
             currentIndex={index}

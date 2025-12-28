@@ -109,5 +109,6 @@ export interface UIAction {
 
 export interface AgentResponse {
   reply: string;
-  ui_action?: UIAction;
+  ui_action?: UIAction; // Deprecated, keep for backward compat for a moment or just remove if we update backend
+  ui_actions?: UIAction[]; // New field for multiple actions
 }
