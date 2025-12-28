@@ -29,6 +29,7 @@ from src.core.tool_registry import ToolRegistry, ToolCategory
 
 # Import agent tools to register them
 import src.tools.agent_tools  # noqa: F401
+import src.tools.analysis_tools  # noqa: F401 - Registers analysis tools
 import src.core.strategy_tool  # noqa: F401 - Registers CompositeStrategyRunner
 import src.skills.indicator_skills  # noqa: F401 - Registers indicator tools
 import src.skills.data_skills  # noqa: F401 - Registers data tools
