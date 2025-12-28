@@ -106,86 +106,121 @@ export const StatsPanel: React.FC<StatsPanelProps> = ({
         };
     }, [decisions, startingBalance]);
 
-    const formatCurrency = (val: number) => {
-        const sign = val >= 0 ? '+' : '';
-        return `${sign}$${val.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    const formatCurrency = (val: number, decimals = 2) => {
+        const sign = val >= 0 ? '+' : '-';
+        return `${sign}$${Math.abs(val).toLocaleString(undefined, { minimumFractionDigits: decimals, maximumFractionDigits: decimals })}`;
     };
 
-    const StatBox = ({ label, value, color = 'text-white', subValue, trend }: {
+    const StatBox = ({ label, value, subValue, trend, trendColor }: {
         label: string;
         value: string | number;
-        color?: string;
         subValue?: string;
-        trend?: 'up' | 'down' | 'neutral';
+        trend?: string;
+        trendColor?: string;
     }) => (
-        <div className="bg-slate-800/40 backdrop-blur-sm border border-slate-700/50 rounded-lg p-3 flex flex-col hover:bg-slate-800/60 transition-colors shadow-sm group">
-            <span className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider mb-1">{label}</span>
-            <span className={`text-base font-bold font-mono ${color} group-hover:scale-105 transition-transform origin-left`}>{value}</span>
+        <div className="bg-slate-900/40 border border-slate-800/60 rounded-lg p-3 flex flex-col justify-between hover:bg-slate-800/40 transition-colors group">
+            <div className="flex justify-between items-start mb-1">
+                <span className="text-[10px] uppercase tracking-wider font-bold text-slate-500 group-hover:text-slate-400 transition-colors">{label}</span>
+                {trend && (
+                   <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${trendColor === 'green' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-rose-500/10 text-rose-400'}`}>
+                       {trend}
+                   </span>
+                )}
+            </div>
+            <div className="flex items-baseline gap-2">
+                 <span className="text-lg font-mono font-medium text-slate-200">{value}</span>
+            </div>
             {subValue && (
-                <div className="flex items-center mt-1">
-                    <span className="text-[10px] text-slate-500 font-mono">{subValue}</span>
-                </div>
+                <div className="text-[10px] text-slate-600 font-medium mt-1 truncate">{subValue}</div>
             )}
         </div>
     );
 
     if (decisions.length === 0) {
         return (
-            <div className="p-4 bg-slate-900 border-b border-slate-800">
-                <div className="text-sm text-slate-500 text-center italic">No scan data loaded to analyze.</div>
+             <div className="bg-slate-950 border-b border-slate-800/60 py-8">
+                <div className="flex flex-col items-center justify-center gap-2 text-slate-600">
+                    <svg className="w-8 h-8 opacity-20" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                    </svg>
+                    <span className="text-xs font-medium uppercase tracking-widest opacity-50">No Data Available</span>
+                </div>
             </div>
         );
     }
 
+    const pnlColor = stats.totalPnL >= 0 ? 'text-emerald-400' : 'text-rose-400';
+    const winRateColor = stats.winRate >= 50 ? 'text-emerald-400' : 'text-amber-400';
+
     return (
-        <div className="px-4 py-3 bg-slate-900 border-b border-slate-800 shadow-md z-10">
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-                {/* Starting Balance */}
-                <StatBox
-                    label="Initial Capital"
-                    value={`$${startingBalance.toLocaleString()}`}
-                    color="text-slate-300"
-                />
+        <div className="bg-slate-950 border-b border-slate-800/60 shadow-sm z-10">
+            <div className="max-w-[1920px] mx-auto px-4 py-3">
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
 
-                {/* End Balance */}
-                <StatBox
-                    label="Current Balance"
-                    value={`$${stats.endBalance.toLocaleString(undefined, { maximumFractionDigits: 0 })}`}
-                    color={stats.endBalance >= startingBalance ? 'text-green-400' : 'text-red-400'}
-                    trend={stats.endBalance >= startingBalance ? 'up' : 'down'}
-                />
+                    {/* Net P&L */}
+                    <div className="bg-slate-900/40 border border-slate-800/60 rounded-lg p-3 relative overflow-hidden group">
+                        <div className={`absolute top-0 right-0 p-3 opacity-10 group-hover:opacity-20 transition-opacity ${stats.totalPnL >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
+                             <svg className="w-12 h-12" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M12 7a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0V8.414l-4.293 4.293a1 1 0 01-1.414 0L8 10.414l-4.293 4.293a1 1 0 01-1.414-1.414l5-5a1 1 0 011.414 0L11 8.586 15.586 4H12z" clipRule="evenodd" /></svg>
+                        </div>
+                        <div className="text-[10px] uppercase tracking-wider font-bold text-slate-500 mb-1">Net P&L</div>
+                        <div className={`text-xl font-mono font-bold ${pnlColor}`}>
+                            {formatCurrency(stats.totalPnL)}
+                        </div>
+                         <div className="text-[10px] text-slate-500 mt-1 flex items-center gap-1">
+                             <span className={stats.endBalance >= startingBalance ? 'text-emerald-500' : 'text-rose-500'}>
+                                 {((stats.totalPnL / startingBalance) * 100).toFixed(2)}%
+                             </span>
+                             <span>return</span>
+                         </div>
+                    </div>
 
-                {/* Total P&L */}
-                <StatBox
-                    label="Net P&L"
-                    value={formatCurrency(stats.totalPnL)}
-                    color={stats.totalPnL >= 0 ? 'text-green-400' : 'text-red-400'}
-                    subValue={`${stats.totalTrades} Trades`}
-                />
+                    {/* Win Rate */}
+                    <StatBox
+                        label="Win Rate"
+                        value={`${stats.winRate.toFixed(1)}%`}
+                        trend={`${stats.wins}W - ${stats.losses}L`}
+                        trendColor={stats.winRate >= 50 ? 'green' : 'red'}
+                        subValue={`Avg Win: ${formatCurrency(stats.avgWin, 0)}`}
+                    />
 
-                {/* Win Rate */}
-                <StatBox
-                    label="Win Rate"
-                    value={`${stats.winRate.toFixed(1)}%`}
-                    color={stats.winRate >= 50 ? 'text-emerald-400' : 'text-amber-400'}
-                    subValue={`${stats.wins}W - ${stats.losses}L`}
-                />
+                    {/* Profit Factor */}
+                    <StatBox
+                        label="Profit Factor"
+                        value={stats.profitFactor === Infinity ? '∞' : stats.profitFactor.toFixed(2)}
+                        subValue={`PF > 1.5 is ideal`}
+                    />
 
-                {/* Max Drawdown */}
-                <StatBox
-                    label="Max Drawdown"
-                    value={`-$${stats.maxDrawdown.toLocaleString(undefined, { maximumFractionDigits: 0 })}`}
-                    color="text-rose-400"
-                    subValue={`${((stats.maxDrawdown / startingBalance) * 100).toFixed(1)}%`}
-                />
+                     {/* Max Drawdown */}
+                     <StatBox
+                        label="Max Drawdown"
+                        value={`-${formatCurrency(stats.maxDrawdown, 0).replace('+', '').replace('-', '')}`}
+                        trend={`${((stats.maxDrawdown / startingBalance) * 100).toFixed(1)}%`}
+                        trendColor="red"
+                        subValue="Peak to Valley"
+                    />
 
-                {/* Profit Factor */}
-                <StatBox
-                    label="Profit Factor"
-                    value={stats.profitFactor === Infinity ? '∞' : stats.profitFactor.toFixed(2)}
-                    color={stats.profitFactor >= 1.5 ? 'text-purple-400' : stats.profitFactor >= 1 ? 'text-blue-400' : 'text-slate-400'}
-                    subValue={`Avg: ${formatCurrency(stats.avgPnL)}`}
-                />
+                    {/* Trades */}
+                    <StatBox
+                        label="Total Trades"
+                        value={stats.totalTrades}
+                        subValue={`Avg PnL: ${formatCurrency(stats.avgPnL, 2)}`}
+                    />
+
+                    {/* Balance */}
+                    <div className="bg-slate-900/40 border border-slate-800/60 rounded-lg p-3 flex flex-col justify-between">
+                         <div className="text-[10px] uppercase tracking-wider font-bold text-slate-500 mb-1">Account Balance</div>
+                         <div className="text-lg font-mono text-slate-300">
+                             ${stats.endBalance.toLocaleString()}
+                         </div>
+                         <div className="w-full bg-slate-800 h-1 mt-2 rounded-full overflow-hidden">
+                             <div
+                                className={`h-full ${stats.endBalance >= startingBalance ? 'bg-emerald-500' : 'bg-rose-500'}`}
+                                style={{ width: '100%' }} // Just a visual indicator line
+                             ></div>
+                         </div>
+                    </div>
+
+                </div>
             </div>
         </div>
     );
