@@ -11,8 +11,22 @@ async function checkBackend(): Promise<boolean> {
     // Only cache success - if previously failed, try again
     if (backendAvailable === true) return true;
 
-    // If no explicit URL, try both ports
+    // If no explicit URL, try relative path (Production Mode) or localhost ports (Dev Mode)
     if (!API_BASE) {
+        // 1. Try relative path (Production: Frontend served by Backend)
+        try {
+            const response = await fetch('/health', { method: 'GET' });
+            if (response.ok) {
+                API_BASE = ''; // Relative path
+                console.log('Backend detected at relative path (Production)');
+                backendAvailable = true;
+                return true;
+            }
+        } catch {
+            // Ignore and try localhost
+        }
+
+        // 2. Try localhost ports (Development: Separate Frontend/Backend)
         for (const port of [8000, 8001]) {
             try {
                 const response = await fetch(`http://localhost:${port}/health`, {
