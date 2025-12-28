@@ -1,42 +1,109 @@
-# Agent Notes
+A. What this project is
 
-Notes to help agents work on this app effectively.
+Deterministic market research + simulation platform
 
-## Architecture Overview
+Not a live trading bot
 
-- **Frontend**: React + Vite + TypeScript at `src/` (App.tsx, components/)
-- **Backend**: FastAPI at `src/server/main.py` (port 8000)
-- **Data**: Parquet at `data/processed/continuous_1m.parquet` (~180k 1-minute bars)
-- **Experiments**: SQLite DB via `src/storage/experiments_db.py`
+Not an auto-execution system
 
-## Key Files
+Focused on learning from price behavior via replay and analysis
 
-| File | Purpose |
-|------|---------|
-| `src/data/loader.py` | Data loading with date filtering |
-| `src/experiments/runner.py` | Strategy scan execution engine |
-| `scripts/run_recipe.py` | CLI for running strategy recipes |
-| `src/server/main.py` | All API endpoints |
-| `src/components/CandleChart.tsx` | Chart with position boxes |
+This sets scope boundaries immediately.
 
-## Performance Notes
+B. Core invariants (non-negotiable)
 
-1. **Data Loading**: Use `load_continuous_contract(start_date, end_date)` to filter at load time
-2. **Parquet**: 3MB vs 31MB JSON - always prefer parquet
-3. **Scans**: Pass date range to loader, not load-then-filter
+Spell these out explicitly:
 
-## Recent Fixes (Dec 2025)
+No future leakage
 
-- **Light mode**: `--light` flag is opt-in, not default
-- **TimeTrigger**: Accepts `time: "11:00"` format
-- **Position boxes**: 2hr buffer restored
-- **TRIGGER_REGISTRY**: Fixed initialization
+All conclusions must be grounded in artifacts (runs, trades, metrics)
+
+Replay/OCO logic is authoritative
+
+Indicators describe context, not signals by default
+
+Models annotate decisions; they do not “decide trades” autonomously
+
+This prevents Jules from “optimizing” the wrong things.
+
+## Safe Exploration Directives
+
+> **RULE: Exploration runs are non-promotable by default.**
+
+### Three-Layer Architecture
+| Layer | Can Touch? | Example |
+|-------|------------|---------|
+| Exploration | ✅ Yes | `explore_strategy`, `compare_explorations` |
+| Pipeline | ❌ Call only | `run_experiment` internals |
+| Presentation (TradeViz) | ❌ Never | `results/viz/`, position boxes |
+
+### Safe Tools (use freely)
+- `explore_strategy` - Sweeps, writes to `results/exploration/`
+- `compare_explorations` - Rank sweep results
+- `diagnose_exploration_run` - Analyze exploration metrics
+- `get_session_context` - RTH/Globex, ORH/ORL, PDH/PDL
+- `explain_scan_fire` - Why a scan fired
+- `scan_coverage_report` - Trigger frequency analysis
+- `counterfactual_entry_shift` - "What if entry N bars earlier?"
+- `get_price_context` - OHLCV around timestamp
+
+### Gated Tools (require user intent)
+- `run_strategy` - Writes TradeViz artifacts
+- `run_modular_strategy` - Writes TradeViz artifacts
+
+### Output Directories
+- **Safe**: `results/exploration/` (metrics only, no viz)
+- **Gated**: `results/viz/` (full artifacts, affects UI)
+
+---
 
 ## Don't Touch
 
 - Heavy ML training code (not used right now)
 - CNN/LSTM model training pipelines
+- Position box rendering logic
+- TradeViz schema definitions
 
-hi agent put some stuff here that you learn to help you work on this app
+D. Tool intent (high level)
 
-this app has many heavy ml training stuff you don't need to install we wont be training models right now
+Describe tools by purpose, not implementation:
+
+Scanning tools: generate candidate opportunities
+
+Replay tools: simulate execution truthfully
+
+Analysis tools: explain performance patterns
+
+Indicator tools: provide contextual signals
+
+Counterfactual tools: test “what if” changes
+
+This helps Jules choose tools intelligently.
+
+E. What agents should NOT do
+
+This is critical for safety:
+
+Do not invent new execution rules
+
+Do not bypass replay logic
+
+Do not assume indicators are predictive
+
+Do not refactor core mechanics without explicit instruction
+
+Do not optimize for win rate alone
+
+This avoids “helpful but destructive” changes.
+
+F. How to validate changes
+
+Give Jules a checklist mindset:
+
+Does this preserve determinism?
+
+Does this maintain artifact compatibility?
+
+Does replay still produce identical results?
+
+Can this be explained to a trader clearly?
