@@ -8,11 +8,12 @@ interface ChatAgentProps {
   currentIndex: number;
   currentMode: 'DECISION' | 'TRADE';
   fastVizMode?: boolean;
+  planningMode?: boolean;
   onAction: (action: UIAction) => void;
   onTextResponse?: () => void;
 }
 
-export const ChatAgent: React.FC<ChatAgentProps> = ({ runId, currentIndex, currentMode, fastVizMode = false, onAction, onTextResponse }) => {
+export const ChatAgent: React.FC<ChatAgentProps> = ({ runId, currentIndex, currentMode, fastVizMode = false, planningMode = false, onAction, onTextResponse }) => {
   const [messages, setMessages] = useState<ChatMessage[]>([
     { role: 'assistant', content: 'Hello! I am the **Trade Viz Agent**. How can I help with your analysis today?' }
   ]);
@@ -37,7 +38,7 @@ export const ChatAgent: React.FC<ChatAgentProps> = ({ runId, currentIndex, curre
     setLoading(true);
 
     try {
-      const response = await api.postAgent([...messages, userMsg], { runId, currentIndex, currentMode, fastVizMode });
+      const response = await api.postAgent([...messages, userMsg], { runId, currentIndex, currentMode, fastVizMode, planningMode });
 
       setMessages(prev => [...prev, { role: 'assistant', content: response.reply }]);
 

@@ -183,3 +183,53 @@ class ListLevelsTool:
         levels.append({"id": "vwap", "category": "Indicator", "description": "Volume Weighted Average Price"})
         
         return {"levels": levels}
+
+
+@ToolRegistry.register(
+    tool_id="list_brackets",
+    category=ToolCategory.UTILITY,
+    name="List Bracket Types",
+    description="List available bracket types for stop loss / take profit configuration.",
+    output_schema={
+        "type": "object",
+        "properties": {
+            "brackets": {"type": "array"}
+        }
+    }
+)
+class ListBracketsTool:
+    def execute(self, **kwargs):
+        """List available bracket types for OCO configuration."""
+        brackets = [
+            {
+                "id": "atr",
+                "name": "ATR-Based",
+                "description": "Stop and target as multiples of ATR",
+                "params": ["stop_atr", "tp_atr", "atr_period"]
+            },
+            {
+                "id": "percent",
+                "name": "Percentage-Based",
+                "description": "Stop and target as percentage of entry price",
+                "params": ["stop_pct", "tp_pct"]
+            },
+            {
+                "id": "fixed",
+                "name": "Fixed Points",
+                "description": "Stop and target as fixed point values",
+                "params": ["stop_points", "tp_points"]
+            },
+            {
+                "id": "ict",
+                "name": "ICT Levels",
+                "description": "Use ICT-style levels (FVG, swing points) for targets",
+                "params": ["use_fvg", "use_swing"]
+            },
+            {
+                "id": "level",
+                "name": "Level-Based",
+                "description": "Target specific price levels (PDH, PDL, etc.)",
+                "params": ["target_level", "stop_level"]
+            }
+        ]
+        return {"brackets": brackets}

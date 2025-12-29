@@ -571,6 +571,7 @@ const App: React.FC = () => {
             currentIndex={index}
             currentMode={mode}
             fastVizMode={fastVizEnabled}
+            planningMode={planningMode}
             onAction={handleAgentAction}
             onTextResponse={handleAgentTextResponse}
           />
@@ -595,7 +596,6 @@ const App: React.FC = () => {
       }
 
     </div>
-    </div >
   );
 };
 
