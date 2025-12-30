@@ -201,15 +201,24 @@ class ComparisonTrigger(Trigger):
     
     def __init__(
         self,
-        feature_a: str,
-        feature_b: str | float,  # Can be feature name or constant
-        condition: str = "above",  # "above", "below", "crosses_above", "crosses_below"
+        # Standard params
+        feature_a: str = None,
+        feature_b: str | float = None,
+        condition: str = "above",  # "above", "below", "near", "crosses_above", "crosses_below"
         direction_on_true: str = "LONG",  # What direction when condition is true
+        # Agent-friendly aliases
+        indicator: str = None,  # Alias for feature_a
+        reference: str | float = None,  # Alias for feature_b
+        comparison: str = None,  # Alias for condition
+        near_threshold: float = 0.002,  # 0.2% for "near" comparison
     ):
-        self._feature_a = feature_a
-        self._feature_b = feature_b
-        self._condition = condition
+        # Support agent-style params (indicator/reference/comparison) 
+        # as aliases for standard params (feature_a/feature_b/condition)
+        self._feature_a = feature_a or indicator or "current_price"
+        self._feature_b = feature_b if feature_b is not None else (reference or "vwap")
+        self._condition = condition if comparison is None else comparison
         self._direction_on_true = direction_on_true
+        self._near_threshold = near_threshold
         
         # For cross detection, track previous state
         self._prev_a_above_b: Optional[bool] = None
@@ -232,6 +241,9 @@ class ComparisonTrigger(Trigger):
         """Check comparison between features."""
         # Get feature A value
         value_a = getattr(features, self._feature_a, None)
+        # Also try 'close' as alias for current_price/bar_close
+        if value_a is None and self._feature_a == "close":
+            value_a = getattr(features, 'bar_close', None) or getattr(features, 'current_price', None)
         if value_a is None:
             return TriggerResult(
                 trigger_id=self.trigger_id,
@@ -261,6 +273,13 @@ class ComparisonTrigger(Trigger):
             triggered = a_above_b
         elif self._condition == "below":
             triggered = not a_above_b
+        elif self._condition == "near":
+            # Price is within threshold of reference level
+            if value_b != 0:
+                distance_pct = abs(value_a - value_b) / value_b
+                triggered = distance_pct <= self._near_threshold
+            else:
+                triggered = False
         elif self._condition == "crosses_above":
             # Was below, now above
             if self._prev_a_above_b is not None:
