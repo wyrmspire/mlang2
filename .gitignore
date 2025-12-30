@@ -69,3 +69,7 @@ cnn_results.txt
 *.db
 coverage/
 coverage.*
+
+# Test scripts (internal validation, not for repo)
+scripts/test_agent_tools.py
+tests/test_fast_viz_*.py

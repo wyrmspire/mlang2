@@ -125,7 +125,16 @@ class RSIThresholdTrigger(Trigger):
         oversold: float = 30.0,
         overbought: float = 70.0,
         timeframe: str = "5m",
+        **kwargs  # Accept unknown args for robustness
     ):
+        # Handle 'above'/'below' as direction aliases (agent may pass these)
+        if 'above' in kwargs and kwargs['above']:
+            direction = 'above'
+            threshold = threshold or 70.0
+        if 'below' in kwargs and kwargs['below']:
+            direction = 'below'
+            threshold = threshold or 30.0
+        
         # Single threshold mode
         if threshold is not None and direction is not None:
             self._mode = "single"

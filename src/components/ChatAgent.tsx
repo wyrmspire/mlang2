@@ -70,8 +70,13 @@ export const ChatAgent: React.FC<ChatAgentProps> = ({ runId, currentIndex, curre
           </div>
           <h3 className="text-xs font-bold text-slate-300 uppercase tracking-widest">Agent Terminal</h3>
         </div>
-        <div className="text-[10px] text-slate-600 font-mono">
-          {runId === 'none' ? 'DISCONNECTED' : 'ONLINE'}
+        <div className="flex items-center gap-2">
+          <div className={`text-[10px] font-bold uppercase tracking-wider ${fastVizMode ? 'text-amber-400' : 'text-emerald-400'}`}>
+            {fastVizMode ? '⚡ FAST' : '🔥 FULL'}
+          </div>
+          <div className="text-[10px] text-slate-600 font-mono">
+            {runId === 'none' ? 'NO RUN' : 'ONLINE'}
+          </div>
         </div>
       </div>
 
@@ -141,8 +146,8 @@ export const ChatAgent: React.FC<ChatAgentProps> = ({ runId, currentIndex, curre
               ref={inputRef}
               value={input}
               onChange={e => setInput(e.target.value)}
-              placeholder={runId === 'none' ? "Select a run to start chatting..." : "Ask for analysis, valid setups, or strategy insights..."}
-              disabled={runId === 'none' || loading}
+              placeholder={runId === 'none' ? "Ask agent to start a new run..." : "Ask for analysis, valid setups, or strategy insights..."}
+              disabled={loading}
               className="w-full bg-slate-900 border border-slate-800 text-slate-200 placeholder-slate-600 rounded-xl px-4 py-3.5 pl-5 pr-12 text-sm focus:outline-none focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/50 transition-all shadow-inner disabled:opacity-50 disabled:cursor-not-allowed"
             />
             <div className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] text-slate-600 font-mono hidden md:block border border-slate-800 px-1.5 py-0.5 rounded">

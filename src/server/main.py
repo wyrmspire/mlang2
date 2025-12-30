@@ -109,7 +109,10 @@ class ChatContext(BaseModel):
     runId: str
     currentIndex: int
     currentMode: str  # 'DECISION' or 'TRADE'
-    fastVizMode: bool = False  # When True, agent emits RUN_FAST_VIZ instead of RUN_STRATEGY
+    fastVizMode: bool = False  # In-memory fast viz (ephemeral until saved)
+    planningMode: bool = False  # Agent prioritizes research
+    fullVizMode: bool = False   # Full viz: saves to disk, shows in Run Picker
+    # Priority: fullVizMode > fastVizMode > light (no viz)
 
 
 class ChatRequest(BaseModel):
@@ -633,62 +636,55 @@ def build_agent_system_prompt(context: ChatContext, decisions: List[Dict], trade
     
     current_json = json.dumps(current, indent=2, default=str)[:1000] if current else "None selected"
 
-    return f"""You are a UNIFIED Research & Trading agent for the MLang2 backtesting platform.
+    return f"""You are a Trading Strategy Agent for MLang2.
 
-YOUR PURPOSE: Help users design, test, analyze, AND visualize trading strategies on HISTORICAL data.
+=== COMPOSITION (USE THIS!) ===
+You can COMPOSE triggers using AND/OR logic. Available triggers include:
+- **rejection** - Price rejection pattern
+- **pin_bar** - Pin bar candle
+- **engulfing** - Engulfing pattern
+- **vwap_reclaim** - Price reclaims VWAP
+- **ema_cross** - EMA crossover
+- **rsi_threshold** - RSI levels
+- **time** - Time-based entry
+- **structure_break** - Break of structure
+- **sweep** - Liquidity sweep
+- **comparison** - Parametric level comparison
 
-=== INTUITIVE EXECUTION (HIGHEST PRIORITY) ===
-1. If user instructions are incomplete (e.g., "Run a trend strategy"), use your BEST JUDGMENT to fill in the blanks.
-2. DO NOT ASK CLARIFYING QUESTIONS about parameters.
-3. Reasonable Defaults:
-   - Strategy: EMA Cross (Trend) or RSI Extreme (Reversion)
-   - Date: 2025-05-01 (or recent available data)
-   - Duration: 2 Weeks
-   - Risk: 2.0 ATR Stop / 4.0 ATR Target
-4. State your assumptions: "Parameters not specified. Running EMA Cross for 2 weeks from May 1st..."
+To COMPOSE triggers, use:
+{{"type": "AND", "children": [
+    {{"type": "rejection", "min_wick_ratio": 0.6}},
+    {{"type": "comparison", "indicator": "close", "comparison": "above", "reference": "vwap"}}
+]}}
 
-=== RESEARCH & ANALYSIS WORKFLOW ===
-You have access to powerful research tools.
-1. **evaluate_scan**: The BEST tool for quick research. Tests a scan condition and returns stats (win rate, EV) without loading the full chart. Use this when the user asks to "check", "test", or "analyze" a signal.
-2. **cluster_trades / compare_trade_pools**: Use these to analyze performance by time of day, session, etc.
-3. **Price First**: ALWAYS reason from RAW PRICE DATA. If asked to "find opportunities", look at price structure first.
+This means: "rejection AND price above VWAP"
 
-=== VISUALIZATION WORKFLOW ===
-When the user wants to SEE the results (chart, trades):
-1. **run_strategy / run_modular_strategy**: Runs the strategy and LOADS it into the visualizer.
-2. **set_index / set_mode**: Navigate the chart.
+Examples:
+1. "VWAP rejection": {{"type": "AND", "children": [{{"type": "rejection"}}, {{"type": "comparison", "indicator": "close", "comparison": "near", "reference": "vwap"}}]}}
+2. "EMA cross above VWAP": {{"type": "AND", "children": [{{"type": "ema_cross", "fast": 9, "slow": 21}}, {{"type": "comparison", "indicator": "ema_5m_20", "comparison": "above", "reference": "vwap"}}]}}
+3. "Pin bar OR engulfing": {{"type": "OR", "children": [{{"type": "pin_bar"}}, {{"type": "engulfing"}}]}}
 
-=== OUTPUT FORMATTING RULES (CRITICAL) ===
-After calling ANY research tool (like evaluate_scan), you MUST synthesize results:
+=== WORKFLOW ===
+1. Parse user intent → map to triggers
+2. Use `run_modular_strategy` with trigger_config containing AND/OR composition
+3. Trades appear on chart
 
-1. **Never just dump raw JSON** - Always explain what the results mean.
+=== TOOLS ===
+- **list_triggers** - See all 18+ available triggers
+- **list_levels** - See price levels (PDH, VWAP, etc.)
+- **run_modular_strategy** - Execute with trigger_config + bracket
 
-2. **Use markdown tables** for comparisons:
-   | Metric | Value |
-   |--------|-------|
-   | Win Rate | 60.9% |
+=== DON'T ===
+- Don't dump raw JSON - synthesize into tables
+- Don't default to ema_cross for everything
+- Don't ask unnecessary questions - just compose and run
 
-3. **Provide a VERDICT** at the end:
-   - "Profitable" / "Not profitable" and WHY
-   - Key insight in one sentence
+=== DATA ===
+Historical: March 17 - September 17, 2025
+Default: 2025-05-01, 2 weeks, ATR 2/3
 
-IMPORTANT: You are working with a FIXED HISTORICAL DATASET (March 17 - September 17, 2025). 
-
-CURRENT CONTEXT:
-- Run ID: {context.runId or "No run loaded"}
-- Viewing: {item_type} index {context.currentIndex} of {total_items}
-- Mode: {context.currentMode}
-
-CURRENT {item_type.upper()} DATA:
-{current_json}
-
-=== YOUR TOOLS ===
-- **Research**: evaluate_scan, cluster_trades, compare_trade_pools, query_experiments
-- **Execution**: run_strategy (visualize), run_modular_strategy (visualize OR silent test)
-- **Navigation**: set_index, set_mode, load_run
-
-NEVER answer "no signals fired" or just dump JSON as a final answer.
-Always provide INSIGHT and INTERPRETATION."""
+CURRENT: Run={context.runId or "None"}, Mode={context.currentMode}, Index={context.currentIndex}/{total_items}
+{current_json}"""
 
 
 
@@ -872,8 +868,11 @@ async def agent_chat(request: ChatRequest) -> AgentResponse:
                         
                         # Map function calls to UI actions or Backend Actions
                         if fn_name == "run_strategy" or fn_name == "run_modular_strategy":
-                            # Check for silent/research mode (Lab style execution)
-                            if fn_args.get("silent", False):
+                            # Check for silent/research mode: planningMode OR explicit silent arg
+                            planning_mode = getattr(request.context, 'planningMode', False)
+                            is_silent = fn_args.get("silent", False) or planning_mode
+                            
+                            if is_silent:
                                 # Run in backend and return text stats
                                 import tempfile
                                 from datetime import timedelta
@@ -952,11 +951,11 @@ async def agent_chat(request: ChatRequest) -> AgentResponse:
                                         Path(recipe_path).unlink()
                                     except:
                                         pass
-
-                                # Normal Viz Execution (UI Action)
+                            else:
+                                # NOT silent - run visualization
                                 config = {
                                     "trigger": fn_args.get("trigger_config") or {
-                                        "type": fn_args.get("trigger_type", "ema_cross"),
+                                        "type": fn_args.get("trigger_type", "swing_low"),
                                         **fn_args.get("trigger_params", {})
                                     },
                                     "bracket": fn_args.get("bracket_config") or {
@@ -966,39 +965,69 @@ async def agent_chat(request: ChatRequest) -> AgentResponse:
                                     }
                                 }
 
-                                # Check if Fast Viz mode is enabled
-                                fast_viz_enabled = request.context.fastVizMode if hasattr(request.context, 'fastVizMode') else False
+                                # Priority: fastVizMode = quick chart, else = full viz + disk
+                                fast_viz_enabled = getattr(request.context, 'fastVizMode', False)
 
                                 if fast_viz_enabled:
-                                    from datetime import timedelta
+                                    # Fast viz: run vectorized backend logic immediately
+                                    from src.sim.fast_forward import fast_viz_strategy
+                                    from datetime import datetime, timedelta
                                     import pandas as pd
+                                    import dataclasses
+                                    import json
+                                    
                                     start_date = fn_args.get('start_date', '2025-05-01')
                                     weeks = fn_args.get('weeks', 2)
                                     start_dt = pd.to_datetime(start_date)
                                     end_dt = start_dt + timedelta(weeks=weeks)
-
+                                    end_date_str = end_dt.strftime("%Y-%m-%d")
+                                    
+                                    # Execute Backend Logic
+                                    print(f"[FAST_VIZ] Running {config['trigger']['type']}...")
+                                    fv_result = fast_viz_strategy(
+                                        config=config,
+                                        start_date=start_date,
+                                        end_date=end_date_str
+                                    )
+                                    
+                                    # Save to disk ("different area")
+                                    out_dir = RESULTS_DIR / "fast_viz"
+                                    out_dir.mkdir(exist_ok=True, parents=True)
+                                    out_file = out_dir / f"{fv_result.run_id}.json"
+                                    
+                                    fv_data = dataclasses.asdict(fv_result)
+                                    with open(out_file, 'w') as f:
+                                        json.dump(fv_data, f, indent=2, default=str)
+                                    
+                                    # populate payload
                                     ui_action = UIAction(
                                         type="RUN_FAST_VIZ",
                                         payload={
                                             "config": config,
                                             "start_date": start_date,
-                                            "end_date": end_dt.strftime("%Y-%m-%d"),
-                                            "run_name": fn_args.get('run_name')
+                                            "end_date": end_date_str,
+                                            "run_name": fv_result.run_id,
+                                            "trades": fv_data.get("trades", []),
+                                            "stats": {
+                                                "total_trades": fv_result.total_trades,
+                                                "win_rate": fv_result.win_rate
+                                            }
                                         }
                                     )
-                                    reply_text = f"⚡ Fast Viz: {fn_args.get('trigger_type', 'modular')} strategy from {start_date} ({weeks} week(s)). Results are approximate - click 💾 to verify with full simulation."
+                                    reply_text = f"⚡ Fast Viz: {fn_args.get('trigger_type', 'modular')} - Found {fv_result.total_trades} trades ({fv_result.win_rate:.1f}% WR). Saved to {fv_result.run_id}."
                                 else:
+                                    # Full viz: saves to disk, shows in Run Picker, training data
                                     ui_action = UIAction(
                                         type="RUN_STRATEGY",
                                         payload={
                                             "strategy": fn_args.get("strategy", "modular"),
-                                            "start_date": fn_args.get("start_date", "2025-03-18"),
-                                            "weeks": fn_args.get("weeks", 1),
+                                            "start_date": fn_args.get("start_date", "2025-05-01"),
+                                            "weeks": fn_args.get("weeks", 2),
                                             "run_name": fn_args.get("run_name"),
                                             "config": config
                                         }
                                     )
-                                    reply_text = f"Running {fn_args.get('trigger_type', 'modular')} strategy scan from {fn_args.get('start_date')} for {fn_args.get('weeks')} week(s)..."
+                                    reply_text = f"🔥 Running {fn_args.get('trigger_type', 'modular')} strategy from {fn_args.get('start_date', '2025-05-01')} for {fn_args.get('weeks', 2)} week(s). Saving to disk..."
                         
                         elif fn_name == "set_index":
                             ui_action = UIAction(type="SET_INDEX", payload=fn_args.get("index", 0))
@@ -1452,3 +1481,192 @@ async def health():
         "available_runs": runs,
         "experiments_count": db.count()
     }
+
+
+# =============================================================================
+# ENDPOINTS: Fast Viz
+# =============================================================================
+
+@app.post("/agent/fast-viz")
+async def run_fast_viz_endpoint(request: RunStrategyRequest) -> Dict[str, Any]:
+    """
+    Run Fast Viz strategy via endpoint.
+    Returns result immediately (no async job).
+    """
+    from src.sim.fast_forward import fast_viz_strategy
+    import dataclasses
+    from datetime import datetime, timedelta
+    import pandas as pd
+    import json
+    
+    # Config
+    if request.config:
+        config = request.config
+    else:
+        # Construct from simple params
+        config = {
+             "trigger": {"type": request.strategy or "ema_cross"},
+             "bracket": {"type": "atr", "stop_atr": 2.0, "tp_atr": 3.0}
+        }
+    
+    # Dates
+    start_date = request.start_date or "2025-05-01"
+    if request.weeks:
+        start_dt = pd.to_datetime(start_date)
+        end_dt = start_dt + timedelta(weeks=request.weeks)
+        end_date = end_dt.strftime("%Y-%m-%d")
+    else:
+        end_date = "2025-05-14"
+        
+    try:
+        # Run
+        result = fast_viz_strategy(config, start_date, end_date, run_id=request.run_name)
+        
+        # Save
+        out_dir = RESULTS_DIR / "fast_viz"
+        out_dir.mkdir(exist_ok=True, parents=True)
+        out_file = out_dir / f"{result.run_id}.json"
+        
+        data = dataclasses.asdict(result)
+        with open(out_file, 'w') as f:
+            json.dump(data, f, indent=2, default=str)
+            
+        return {
+            "success": True,
+            "run_id": result.run_id,
+            "stats": {
+                "total_trades": result.total_trades,
+                "win_rate": result.win_rate
+            },
+            "saved_to": str(out_file)
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+@app.post("/fast-viz/run")
+async def fast_viz_run_endpoint(request: Dict[str, Any]) -> Dict[str, Any]:
+    """Run Fast Viz strategy (frontend compatible)."""
+    from src.sim.fast_forward import fast_viz_strategy
+    import dataclasses
+    import json
+    
+    config = request.get("config", {})
+    start_date = request.get("start_date", "2025-05-01")
+    end_date = request.get("end_date", "2025-05-14")
+    run_name = request.get("run_name")
+    
+    try:
+        result = fast_viz_strategy(config, start_date, end_date, run_id=run_name)
+        
+        # Save
+        out_dir = RESULTS_DIR / "fast_viz"
+        out_dir.mkdir(exist_ok=True, parents=True)
+        out_file = out_dir / f"{result.run_id}.json"
+        
+        data = dataclasses.asdict(result)
+        with open(out_file, 'w') as f:
+            json.dump(data, f, indent=2, default=str)
+            
+        return {
+            "run_id": result.run_id,
+            "strategy_name": result.strategy_name,
+            "total_trades": result.total_trades,
+            "win_rate": result.win_rate,
+            "start_date": result.start_date,
+            "end_date": result.end_date,
+            "trades": data.get("trades", []),
+            "config": config
+        }
+    except Exception as e:
+        print(f"[FAST_VIZ] Error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/fast-viz/list")
+async def fast_viz_list() -> List[Dict[str, Any]]:
+    """List available Fast Viz runs."""
+    import json
+    out_dir = RESULTS_DIR / "fast_viz"
+    if not out_dir.exists():
+        return []
+        
+    runs = []
+    for f in out_dir.glob("*.json"):
+        try:
+            with open(f, 'r') as fp:
+                data = json.load(fp)
+                runs.append({
+                    "run_id": data.get("run_id", f.stem),
+                    "strategy_name": data.get("strategy_name", "unknown"),
+                    "total_trades": data.get("total_trades", 0),
+                    "win_rate": data.get("win_rate", 0),
+                    "start_date": data.get("start_date"),
+                    "end_date": data.get("end_date")
+                })
+        except:
+            continue
+            
+    # Sort by run_id desc (timestamp)
+    return sorted(runs, key=lambda x: x["run_id"], reverse=True)
+
+@app.get("/fast-viz/{run_id}")
+async def fast_viz_get(run_id: str) -> Dict[str, Any]:
+    """Get full Fast Viz run data."""
+    import json
+    fpath = RESULTS_DIR / "fast_viz" / f"{run_id}.json"
+    if not fpath.exists():
+        raise HTTPException(status_code=404, detail="Run not found")
+        
+    try:
+        with open(fpath, 'r') as f:
+            return json.load(f)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/fast-viz/{run_id}")
+async def fast_viz_delete(run_id: str):
+    """Delete a Fast Viz run."""
+    fpath = RESULTS_DIR / "fast_viz" / f"{run_id}.json"
+    if fpath.exists():
+        fpath.unlink()
+    return {"success": True}
+
+@app.post("/fast-viz/save/{run_id}")
+async def fast_viz_save(run_id: str) -> Dict[str, Any]:
+    """Promote a Fast Viz run to a Full Strategy Run."""
+    import json
+    from datetime import datetime
+    
+    fpath = RESULTS_DIR / "fast_viz" / f"{run_id}.json"
+    if not fpath.exists():
+        raise HTTPException(status_code=404, detail="Run not found")
+        
+    try:
+        with open(fpath, 'r') as f:
+            data = json.load(f)
+            
+        config = data.get("config")
+        start_date = data.get("start_date")
+        
+        # New run name based on saved time
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        new_run_id = f"saved_{run_id}_{timestamp}"
+        
+        req = RunStrategyRequest(
+            strategy="modular", # Doesn't matter if config present
+            start_date=start_date,
+            weeks=2, # Approximate, or calculate from end_date
+            run_name=new_run_id,
+            config=config
+        )
+        
+        # Execute
+        result = await run_strategy(req)
+        
+        if result.get("success"):
+            return {"success": True, "new_run_id": new_run_id}
+        else:
+            return {"success": False, "error": result.get("error")}
+            
+    except Exception as e:
+        print(f"[FAST_VIZ_SAVE] Error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

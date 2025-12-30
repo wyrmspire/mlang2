@@ -89,26 +89,25 @@ class RunStrategyTool:
     tool_id="run_modular_strategy",
     category=ToolCategory.STRATEGY,
     name="Run Modular Strategy",
-    description="Run a modular strategy scan on historical data with custom trigger and bracket configuration.",
+    description="Run a strategy scan. Use trigger_config for AND/OR composition, or trigger_type for simple triggers.",
     input_schema={
         "type": "object",
         "properties": {
             "trigger_config": {
                 "type": "object",
-                "description": "Full generic trigger configuration (alternative to trigger_type)"
+                "description": "Full trigger config with AND/OR composition. Example: {type: 'AND', children: [{type: 'rejection'}, {type: 'comparison', indicator: 'close', comparison: 'above', reference: 'vwap'}]}"
             },
             "trigger_type": {
                 "type": "string",
-                "enum": ["ema_cross", "ema_bounce", "rsi_threshold", "ifvg", "orb", "candle_pattern", "time"],
-                "description": "Type of entry trigger (legacy/simplified)"
+                "description": "Simple trigger type (rejection, pin_bar, ema_cross, rsi_threshold, vwap_reclaim, sweep, structure_break, time, candle_pattern, comparison, etc.)"
             },
             "trigger_params": {
                 "type": "object",
-                "description": "Parameters for the trigger (e.g., {fast: 9, slow: 21} for ema_cross)"
+                "description": "Parameters for simple trigger_type (e.g., {fast: 9, slow: 21} for ema_cross)"
             },
             "bracket_config": {
                 "type": "object",
-                "description": "Full generic bracket configuration"
+                "description": "Full bracket configuration"
             },
             "bracket_type": {
                 "type": "string",

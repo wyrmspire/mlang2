@@ -111,6 +111,24 @@ const App: React.FC = () => {
   // Effective decisions (use Fast Viz if selected, otherwise regular)
   const effectiveDecisions = selectedFastVizRunId ? fastVizDecisions : decisions;
 
+  // Load Fast Viz runs on mount
+  useEffect(() => {
+    api.listFastVizRuns()
+      .then(runs => {
+        if (Array.isArray(runs)) {
+          console.log("Loaded Fast Viz runs:", runs.length);
+          setFastVizRuns(runs);
+        } else {
+          console.error("Invalid runs format:", runs);
+          setFastVizRuns([]);
+        }
+      })
+      .catch(err => {
+        console.error(err);
+        setFastVizRuns([]);
+      });
+  }, []);
+
   // Load continuous contract data
   useEffect(() => {
     setContinuousLoading(true);
@@ -198,12 +216,30 @@ const App: React.FC = () => {
       case 'RUN_FAST_VIZ':
         try {
           console.log("Running Fast Viz...", action.payload);
-          const fvResult = await api.runFastViz(
-            action.payload.config,
-            action.payload.start_date,
-            action.payload.end_date,
-            action.payload.run_name
-          );
+          let fvResult;
+
+          // Use payload trades if available (instant from agent)
+          if (action.payload.trades) {
+            console.log("Using instant trades from payload");
+            fvResult = {
+              run_id: action.payload.run_name || `fast_viz_${Date.now()}`,
+              strategy_name: action.payload.config?.trigger?.type || "unknown",
+              total_trades: action.payload.stats?.total_trades || action.payload.trades.length,
+              win_rate: action.payload.stats?.win_rate || 0,
+              start_date: action.payload.start_date,
+              end_date: action.payload.end_date,
+              trades: action.payload.trades
+            };
+          } else {
+            // Fallback: fetch from API
+            fvResult = await api.runFastViz(
+              action.payload.config,
+              action.payload.start_date,
+              action.payload.end_date,
+              action.payload.run_name
+            );
+          }
+
           const newRun: FastVizRun = {
             run_id: fvResult.run_id,
             strategy_name: fvResult.strategy_name,
@@ -213,7 +249,13 @@ const App: React.FC = () => {
             end_date: fvResult.end_date,
             trades: fvResult.trades || []
           };
-          setFastVizRuns(prev => [...prev, newRun]);
+
+          setFastVizRuns(prev => {
+            // Deduplicate
+            if (prev.find(r => r.run_id === newRun.run_id)) return prev;
+            return [newRun, ...prev];
+          });
+
           // Auto-select the new Fast Viz run to show on chart
           setSelectedFastVizRunId(fvResult.run_id);
           // Clear regular run selection when viewing Fast Viz
@@ -398,7 +440,10 @@ const App: React.FC = () => {
         {/* Scrollable Content */}
         <div className="flex-1 overflow-y-auto overflow-x-hidden p-4 space-y-6 custom-scrollbar bg-slate-950">
 
-          <RunPicker onSelect={setCurrentRun} />
+          <RunPicker onSelect={(runId) => {
+            setCurrentRun(runId);
+            setSelectedFastVizRunId(null);
+          }} />
 
           {/* Fast Viz Mode Toggle & Runs */}
           <div className="bg-slate-900/40 rounded-lg p-3 border border-amber-800/30">
@@ -435,7 +480,8 @@ const App: React.FC = () => {
                     </div>
                     <div className="flex gap-1 ml-2">
                       <button
-                        onClick={async () => {
+                        onClick={async (e) => {
+                          e.stopPropagation();
                           try {
                             const result = await api.saveFastVizRun(run.run_id);
                             if (result.success) {
@@ -450,7 +496,8 @@ const App: React.FC = () => {
                         💾
                       </button>
                       <button
-                        onClick={async () => {
+                        onClick={async (e) => {
+                          e.stopPropagation();
                           try {
                             await api.deleteFastVizRun(run.run_id);
                             setFastVizRuns(prev => prev.filter(r => r.run_id !== run.run_id));

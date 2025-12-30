@@ -48,6 +48,16 @@ class FeatureConfig:
 
 
 @dataclass
+class Candle:
+    """Simple candle for trigger compatibility."""
+    open: float
+    high: float
+    low: float
+    close: float
+    volume: float = 0.0
+
+
+@dataclass
 class FeatureBundle:
     """
     Complete feature bundle for a single decision point.
@@ -74,6 +84,14 @@ class FeatureBundle:
     timestamp: Optional[pd.Timestamp] = None
     current_price: float = 0.0
     atr: float = 0.0
+    
+    @property
+    def candles(self):
+        """Return ohlcv_1m as list of Candle objects for trigger compatibility."""
+        if self.market_state is None:
+            return []
+        ohlcv = self.market_state.ohlcv_1m
+        return [Candle(open=row[0], high=row[1], low=row[2], close=row[3], volume=row[4]) for row in ohlcv]
 
 
 def compute_features(

@@ -103,9 +103,9 @@ def detect_entries_vectorized(df: pd.DataFrame, trigger_config: Dict[str, Any]) 
         signals.loc[short_signals, "signal"] = True
         signals.loc[short_signals, "direction"] = "SHORT"
         
-    elif trigger_type in ("vwap_bounce", "ema_bounce"):
+    elif trigger_type in ("vwap_bounce", "ema_bounce", "vwap_reclaim"):
         # VWAP/EMA bounce detection: price crosses above indicator after being below
-        if trigger_type == "vwap_bounce":
+        if trigger_type in ("vwap_bounce", "vwap_reclaim"):
             # Calculate VWAP (cumulative price*volume / cumulative volume)
             if "volume" in df.columns:
                 df["_vwap"] = (df["close"] * df["volume"]).cumsum() / df["volume"].cumsum()
